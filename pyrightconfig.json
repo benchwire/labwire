@@ -1,0 +1,15 @@
+{
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["packages", "examples", "tests"],
+  "exclude": ["**/__pycache__", ".venv"],
+  "extraPaths": [
+    "packages/core/src",
+    "packages/sim/src",
+    "packages/drivers/src",
+    "packages/cli/src",
+    "packages/mcp/src"
+  ]
+}

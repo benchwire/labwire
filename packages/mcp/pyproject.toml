@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-mcp"
+version = "0.1.0.dev0"
+description = "MCP adapter: expose Labwire instruments as MCP tools for AI agents"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+dependencies = ["labwire-core", "mcp>=1.2"]
+
+[project.scripts]
+labwire-mcp = "labwire.mcp.main:main"
+
+[dependency-groups]
+dev = ["labwire-sim", "labwire-drivers"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+labwire-sim = { workspace = true }
+labwire-drivers = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]

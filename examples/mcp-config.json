@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "labwire": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "/absolute/path/to/labwire",
+        "labwire-mcp",
+        "ws://127.0.0.1:9520"
+      ]
+    }
+  }
+}

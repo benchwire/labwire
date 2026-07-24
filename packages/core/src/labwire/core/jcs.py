@@ -1,0 +1,77 @@
+"""RFC 8785 (JCS) JSON canonicalization (SPEC §12.2).
+
+Vendored implementation (the algorithm is small and dependency-free): keys
+sort by code point, strings use minimal escaping with literal UTF-8, and
+numbers follow ECMAScript ``Number::toString`` formatting.
+
+Example:
+    >>> from labwire.core.jcs import jcs_dumps
+    >>> jcs_dumps({"b": 1.0, "a": "25°C"})
+    '{"a":"25°C","b":1}'
+"""
+
+import json
+import math
+from decimal import Decimal
+from typing import Any, cast
+
+
+def _jcs_number(value: float) -> str:
+    if math.isnan(value) or math.isinf(value):
+        raise ValueError("non-finite numbers are not representable in JSON")
+    if value == 0:
+        return "0"  # including -0.0, per ECMAScript
+    if value == int(value) and abs(value) < 1e21:
+        return str(int(value))
+    text = repr(value)  # shortest round-trip digits, Python formatting
+    if "e" in text:
+        mantissa, _, exponent = text.partition("e")
+        exp = int(exponent)
+        if -7 < exp < 21:  # ECMAScript uses plain decimal in this range
+            scaled = Decimal(mantissa).scaleb(exp)  # exact: same digits, shifted
+            return format(scaled, "f")
+        sign = "+" if exp >= 0 else "-"
+        return f"{mantissa}e{sign}{abs(exp)}"
+    return text
+
+
+def jcs_dumps(value: Any) -> str:
+    """Serialize ``value`` as RFC 8785 canonical JSON.
+
+    Example:
+        >>> jcs_dumps({"v": 56.0})
+        '{"v":56}'
+    """
+    match value:
+        case None:
+            return "null"
+        case bool():
+            return "true" if value else "false"
+        case int():
+            return str(value)
+        case float():
+            return _jcs_number(value)
+        case str():
+            return json.dumps(value, ensure_ascii=False)
+        case list() | tuple():
+            items: list[Any] = list(cast("list[Any] | tuple[Any, ...]", value))
+            return "[" + ",".join(jcs_dumps(v) for v in items) + "]"
+        case dict():
+            mapping = cast("dict[str, Any]", value)
+            parts = [
+                f"{json.dumps(k, ensure_ascii=False)}:{jcs_dumps(v)}"
+                for k, v in sorted(mapping.items())
+            ]
+            return "{" + ",".join(parts) + "}"
+        case _:
+            raise TypeError(f"not JSON-serializable: {type(value).__name__}")
+
+
+def jcs_canonical(value: Any) -> bytes:
+    """UTF-8 bytes of the canonical form — the signing/digest input.
+
+    Example:
+        >>> jcs_canonical({"v": 1})
+        b'{"v":1}'
+    """
+    return jcs_dumps(value).encode()

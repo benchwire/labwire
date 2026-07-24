@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-core"
+version = "0.1.0.dev0"
+description = "Labwire core protocol library: server and client SDKs"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+keywords = ["laboratory", "instruments", "json-rpc", "protocol", "ai-agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.7",
+    "pynacl>=1.5",
+    "websockets>=14",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]

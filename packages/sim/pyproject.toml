@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-sim"
+version = "0.1.0.dev0"
+description = "Labwire simulated instruments: realistic devices speaking native wire protocols"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+dependencies = ["labwire-core"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]

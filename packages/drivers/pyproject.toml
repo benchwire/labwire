@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-drivers"
+version = "0.1.0.dev0"
+description = "Labwire instrument drivers speaking native wire protocols (SCPI/TCP, serial-style)"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+dependencies = ["labwire-core"]
+
+[dependency-groups]
+dev = ["labwire-sim"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+labwire-sim = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]
