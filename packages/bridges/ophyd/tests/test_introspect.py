@@ -89,12 +89,24 @@ def test_sim_devices_have_no_units_at_all() -> None:
     assert {u.key for u in draft.unresolved} == {c.key for c in draft.components}
 
 
-def test_settable_channels_yield_set_commands_at_s2() -> None:
+def test_positioners_expose_move_rather_than_signal_setters() -> None:
+    """A put to a setpoint signal returns before the motion completes."""
     draft = introspect(SynAxis(name="ax"))
     commands = {c.name: c for c in draft.commands}
-    assert "set_setpoint" in commands
-    assert commands["set_setpoint"].safety_class == "S2"
-    assert commands["set_setpoint"].component_key == "ax_setpoint"
+    assert commands["move"].safety_class == "S2"
+    assert commands["move"].component_key == "ax"  # the primary readback
+    assert not any(c.name.startswith("set_") for c in draft.commands)
+
+
+def test_non_positioners_expose_per_component_setters_at_s2() -> None:
+    class Bank(Device):
+        knob = Cpt(UnitSignal, value=0.0, kind=Kind.hinted)
+
+    draft = introspect(Bank(name="bank"))
+    commands = {c.name: c for c in draft.commands}
+    assert "move" not in commands
+    assert commands["set_knob"].safety_class == "S2"
+    assert commands["set_knob"].component_key == "bank_knob"
 
 
 def test_trigger_is_s1_stop_is_s0_read_is_s1() -> None:

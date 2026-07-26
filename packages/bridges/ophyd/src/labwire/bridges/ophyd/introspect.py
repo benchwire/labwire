@@ -302,18 +302,38 @@ def _commands_for(device: object, components: list[DraftComponent]) -> list[Draf
             safety_class="S1",
         )
     ]
-    for component in components:
-        if component.role is ComponentRole.CHANNEL and component.settable:
+    channels = [c for c in components if c.role is ComponentRole.CHANNEL]
+    if callable(getattr(device, "set", None)):
+        # A positioner is actuated through the device's own set(): a put to its
+        # setpoint signal returns before the motion completes, so exposing
+        # per-signal setters here would let an agent believe a move had
+        # finished while the axis was still travelling.
+        primary = next(
+            (c for c in channels if c.key == getattr(device, "name", "")),
+            channels[0] if channels else None,
+        )
+        if primary is not None:
             commands.append(
                 DraftCommand(
-                    name=f"set_{component.attr}",
-                    description=(
-                        f"Set {component.attr} and wait for the ophyd status to complete."
-                    ),
+                    name="move",
+                    description=("Move the device to a target position and wait for it to arrive."),
                     safety_class="S2",
-                    component_key=component.key,
+                    component_key=primary.key,
                 )
             )
+    else:
+        for component in channels:
+            if component.settable:
+                commands.append(
+                    DraftCommand(
+                        name=f"set_{component.attr}",
+                        description=(
+                            f"Set {component.attr} and wait for the ophyd status to complete."
+                        ),
+                        safety_class="S2",
+                        component_key=component.key,
+                    )
+                )
     if callable(getattr(device, "trigger", None)):
         commands.append(
             DraftCommand(

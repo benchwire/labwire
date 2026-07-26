@@ -79,7 +79,7 @@ def test_check_passes_once_the_gaps_are_closed(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     # SynAxis: readback+setpoint are channels; velocity+acceleration are config
     assert "2 channel(s), 4 component(s)" in proc.stdout
-    assert "S2  set_setpoint" in proc.stdout
+    assert "S2  move" in proc.stdout
 
 
 def test_check_allow_partial_reports_what_it_dropped(tmp_path: Path) -> None:

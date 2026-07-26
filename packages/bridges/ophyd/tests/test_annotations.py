@@ -356,7 +356,7 @@ def test_annotated_limits_intersect_with_reported_control_limits() -> None:
 def test_safety_class_defaults_hold_without_annotation() -> None:
     resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(_axis_units()))
     classes = {c.name: c.safety_class for c in resolved.commands}
-    assert classes["set_setpoint"] == "S2"
+    assert classes["move"] == "S2"
     assert classes["stop"] == "S0"
     assert classes["read"] == "S1"
 
@@ -366,23 +366,24 @@ def test_annotation_can_raise_and_lower_a_safety_class() -> None:
     devices = raw["devices"]
     assert isinstance(devices, dict)
     devices["ophyd.sim.SynAxis"]["commands"] = {  # pyright: ignore[reportIndexIssue]
-        "set_setpoint": {"safety_class": "S3"},  # a hazardous axis
+        "move": {"safety_class": "S3"},  # a hazardous axis
         "read": {"safety_class": "S0"},
     }
     resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(raw))
     classes = {c.name: c.safety_class for c in resolved.commands}
-    assert classes["set_setpoint"] == "S3"
+    assert classes["move"] == "S3"
     assert classes["read"] == "S0"
 
 
-def test_component_safety_class_applies_to_its_set_command() -> None:
+def test_component_safety_class_applies_to_its_command() -> None:
+    """A positioner's move takes its class from the position component."""
     raw = _axis_units()
     devices = raw["devices"]
     assert isinstance(devices, dict)
-    devices["ophyd.sim.SynAxis"]["components"]["setpoint"]["safety_class"] = "S3"  # pyright: ignore[reportIndexIssue]
+    devices["ophyd.sim.SynAxis"]["components"]["readback"]["safety_class"] = "S3"  # pyright: ignore[reportIndexIssue]
     resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(raw))
     classes = {c.name: c.safety_class for c in resolved.commands}
-    assert classes["set_setpoint"] == "S3"
+    assert classes["move"] == "S3"
 
 
 def test_annotating_an_unknown_command_is_an_error() -> None:
@@ -413,13 +414,13 @@ devices:
     assert resolved.omitted == []  # excluded on purpose is not an unresolved gap
 
 
-def test_excluding_a_component_drops_its_set_command(tmp_path: Path) -> None:
+def test_excluding_a_component_drops_its_command(tmp_path: Path) -> None:
     raw = _axis_units()
     devices = raw["devices"]
     assert isinstance(devices, dict)
-    devices["ophyd.sim.SynAxis"]["components"]["setpoint"] = {"exclude": True}  # pyright: ignore[reportIndexIssue]
+    devices["ophyd.sim.SynAxis"]["components"]["readback"] = {"exclude": True}  # pyright: ignore[reportIndexIssue]
     resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(raw))
-    assert "set_setpoint" not in {c.name for c in resolved.commands}
+    assert "move" not in {c.name for c in resolved.commands}
 
 
 def test_dtype_can_be_overridden_because_ophyd_infers_it_from_a_value() -> None:

@@ -24,6 +24,7 @@ from labwire.bridges.ophyd.annotations import (
     load_annotations,
     resolve,
 )
+from labwire.bridges.ophyd.bridge import OphydBridgeBase, OphydInstrument
 from labwire.bridges.ophyd.introspect import (
     ComponentRole,
     DraftCommand,
@@ -43,6 +44,8 @@ __all__ = [
     "DraftCommand",
     "DraftComponent",
     "DraftInstrument",
+    "OphydBridgeBase",
+    "OphydInstrument",
     "ResolvedCommand",
     "ResolvedComponent",
     "ResolvedInstrument",

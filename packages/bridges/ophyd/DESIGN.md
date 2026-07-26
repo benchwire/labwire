@@ -19,18 +19,31 @@ signable. ophyd is an **optional dependency**, never vendored or modified
 | ophyd | Labwire |
 |---|---|
 | `Device.name` | `IdentityInfo.serial_number` (model = class name, manufacturer = "ophyd bridge (Labwire)", firmware = the ophyd version) |
-| `Kind.hinted` (5) / `Kind.normal` (1) | telemetry channel, plus `set_<attr>` if settable |
+| `Kind.hinted` (5) / `Kind.normal` (1) | telemetry channel, plus a setter if settable (see below) |
 | `Kind.config` (2) | descriptor metadata only — never a settable command |
 | `Kind.omitted` (0) | skipped entirely |
 | `describe()[key]["units"]` | UCUM unit, after EGU translation (§ Units) |
 | `lower_ctrl_limit` / `upper_ctrl_limit` | JSON Schema `minimum` / `maximum` on the set parameter |
 | `describe()[key]["dtype"]` | channel dtype: `number`→`float64`, `integer`→`int64`, `boolean`→`bool`, `string`→`string` |
-| `Device.set()` | `set_<attr>` command, safety class **S2** |
+| `Device.set()` on a positioner | `move` command, safety class **S2** |
+| `signal.set()` on a non-positioner | `set_<attr>` command, safety class **S2** |
 | `Device.trigger()` | `trigger` command, safety class **S1** |
 | `Device.stop()` | `stop` command, safety class **S0** |
 | `MoveStatus.watch()` | `ctx.progress(...)` |
 | `MoveStatus` failure / `exception` | `HardwareFaultError`; timeout → `DeviceTimeoutError` |
 | Labwire `command/cancel` | `device.stop(success=False)` → `CanceledError` |
+
+### Positioners are moved, not poked
+
+If the device itself is settable — `SynAxis` and every ophyd positioner —
+the bridge exposes a single `move` command backed by `device.set()`, and
+exposes **no** per-signal setters. This is a correctness matter, not taste:
+a put to a positioner's `setpoint` signal returns a status that completes
+immediately while the axis is still travelling, so an agent that waited on
+it would believe a move had finished when it had not. `device.set()`
+returns a `MoveStatus` that completes on arrival. Devices with no
+device-level `set()` (detectors, signal banks) get one `set_<attr>` per
+settable channel instead.
 
 ### Naming
 
@@ -77,7 +90,7 @@ defaults lean toward friction:
 
 | Command | Default | Why |
 |---|---|---|
-| `set_<attr>` | **S2** | Actuation: it moves or changes the device, and may be irreversible |
+| `move` / `set_<attr>` | **S2** | Actuation: it moves or changes the device, and may be irreversible |
 | `trigger` | **S1** | Acquisition is reversible and consumes nothing |
 | `read` | **S1** | A pure read |
 | `stop` | **S0** | The recovery path; must stay submittable while interlocked |
@@ -94,7 +107,16 @@ inference here has physical consequences.
 - **Classic synchronous ophyd only.** `ophyd-async` is future work, not
   attempted here.
 - ophyd is blocking, so every ophyd call runs in `asyncio.to_thread`; a
-  badly behaved device still occupies a worker thread.
+  badly behaved device still occupies a worker thread. (There is a test that
+  the server keeps answering while a one-second move is in flight.)
+- **Cancellation is best-effort and device-dependent.** Labwire's cancel
+  calls `device.stop()` and ends the run immediately rather than waiting for
+  the status, because a stopped device is not guaranteed to resolve it: an
+  `ophyd.sim` axis ignores `stop()` and still arrives at its target. Real
+  motors honor stop; simulated ones may not, and the run is reported
+  canceled either way.
+- Device values arrive as numpy scalars, which are coerced to plain JSON
+  numbers (and to the channel's declared dtype) at the bridge boundary.
 - `describe()` infers dtype from the current value for sim signals (an axis
   resting at integer `0` reports `integer`), so dtype is a hint an annotation
   can override.
