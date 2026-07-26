@@ -4,6 +4,30 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
+## Unreleased
+
+### Added
+
+- **`labwire-ophyd`**, a bridge exposing [ophyd](https://github.com/bluesky/ophyd)
+  devices as Labwire instruments
+  ([packages/bridges/ophyd](packages/bridges/ophyd)): introspection of a
+  device's components, a YAML annotation file supplying the units and safety
+  classes ophyd does not carry, a `labwire-ophyd` CLI that generates and
+  checks those files, and a runtime that serves a live device over the
+  protocol. `make demo-ophyd` scans a simulated beamline rig for a detector
+  peak and verifies the signed bundle; `make demo-ophyd-claude` has a Claude
+  agent plan the same scan. Verified against `ophyd.sim` devices and a
+  caproto soft EPICS IOC over Channel Access — **never against physical
+  hardware**; see the package's LIMITATIONS section.
+
+### Fixed
+
+- Canonicalization (RFC 8785) mishandled numeric types that are not `int` or
+  `float`: a float subclass leaked its own `repr` into the signed bytes
+  (numpy scalars serialized as `np.float64(0.5)`), and numpy integers raised
+  outright. Any instrument publishing numpy values — which every EPICS or
+  ophyd device does — could produce a corrupt or unverifiable manifest.
+
 ## 0.2.0 — 2026-07-26
 
 Physical typing and safety classification, adopted from

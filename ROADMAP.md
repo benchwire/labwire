@@ -33,8 +33,14 @@ conformance table (SPEC §14.2) rather than implied to exist.
 
 ## Ecosystem bridges
 
-- **`labwire-bluesky`** — an Ophyd-compatible device wrapper so Bluesky
-  plans can drive Labwire instruments, and Labwire can expose Ophyd devices.
+- **`labwire-ophyd` — shipped, with caveats.** Any classic ophyd device can
+  be served as a Labwire instrument
+  ([packages/bridges/ophyd](packages/bridges/ophyd)), verified against
+  `ophyd.sim` devices and a caproto soft IOC over Channel Access. Never
+  connected to physical hardware; read that package's LIMITATIONS section
+  before relying on it.
+- **The other direction** — an Ophyd-compatible wrapper so Bluesky *plans*
+  can drive Labwire instruments. Only ophyd→Labwire exists today.
 - **ophyd bridge follow-ons** — `ophyd-async` support (only classic synchronous
   ophyd is bridged today), array- and enum-valued signals (Labwire v0.2
   channels carry scalars), and progress reporting from `MoveStatus.watch()`

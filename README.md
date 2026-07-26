@@ -108,6 +108,7 @@ in CI.
 | [labwire-drivers](packages/drivers) | Drivers wrapping those native protocols as Labwire instruments |
 | [labwire-mcp](packages/mcp) | MCP adapter: every instrument command becomes an MCP tool |
 | [labwire-cli](packages/cli) | `labwire verify <bundle>` — authenticate signed run evidence |
+| [labwire-ophyd](packages/bridges/ophyd) | Bridge: serve any ophyd (Bluesky) device as a Labwire instrument |
 | [spec/](spec) | The protocol specification (v0.2 draft) |
 | [examples/](examples) | Quickstart, streaming/recovery, and the closed-loop demo |
 
@@ -160,6 +161,26 @@ commands proves deployment policy, not operator identity — cryptographic
 operator binding is on the [roadmap](ROADMAP.md), not in v0.2. Non-goals for
 now: fleet control, web UI, auth beyond a stub API key, real hardware
 drivers, cloud hosting.
+
+## Bring your own instruments (ophyd bridge)
+
+Labwire does not aim to reimplement thousands of drivers. The
+[ophyd bridge](packages/bridges/ophyd) exposes any classic
+[ophyd](https://github.com/bluesky/ophyd) device — the hardware layer under
+Bluesky, widely used at synchrotron facilities — as a Labwire instrument:
+
+```bash
+uv run labwire-ophyd annotate ophyd.sim:motor -o labwire-ophyd.yaml
+make demo-ophyd     # a peak-finding scan over bridged ophyd.sim devices
+```
+
+ophyd knows a device's structure; it carries no units and no notion of risk.
+A small YAML annotation file supplies those, the bridge refuses to serve a
+device whose quantities have no UCUM unit, and actuation is classified S2 so
+an agent must present an operator confirmation to move anything. Verified
+against simulated devices and a soft EPICS IOC over Channel Access —
+**never against physical hardware**; the package's LIMITATIONS section is
+explicit about what that does and does not mean.
 
 ## Prior art & positioning
 
