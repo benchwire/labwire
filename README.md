@@ -152,9 +152,21 @@ real instruments is claimed**. In the closed-loop demo, the chemistry between
 devices is computed by the demo harness. v0.1 non-goals: fleet control,
 web UI, auth beyond a stub API key, real hardware drivers, cloud hosting.
 
-Labwire deliberately borrows from prior art — MCP, SiLA 2, OPC-UA LADS,
-Bluesky/Ophyd, PyLabRobot — and [PRIOR_ART.md](PRIOR_ART.md) compares them
-honestly, including what those systems do better.
+## Prior art & positioning
+
+Agent-to-instrument protocols became an active space in 2025–2026: **LAP**
+([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)) is a thoughtful
+design specification for the same agent-to-instrument edge Labwire targets,
+and **SCP** ([arXiv:2512.24189](https://arxiv.org/abs/2512.24189)) extends
+MCP with a hub-mediated registry deployed at platform scale. Labwire and
+LAP are independent convergent designs, and protocol v0.2 adopts two of
+LAP's ideas — mandatory UCUM unit codes and the S0–S3 safety-class
+taxonomy — with credit. The practical difference today is simple: LAP is a
+specification without a published implementation, while Labwire is running
+code — spec, SDKs, simulators, signed runs, an MCP adapter, and a
+five-minute quickstart. [PRIOR_ART.md](PRIOR_ART.md) has the full honest
+comparison — including MCP, SiLA 2, OPC-UA LADS, Bluesky/Ophyd, and
+PyLabRobot, and what each does better than Labwire.
 
 ## Development
 

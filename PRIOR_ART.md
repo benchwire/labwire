@@ -29,6 +29,75 @@ specifies the instrument-domain semantics MCP has no opinion on — command
 lifecycles with cancellation, sequenced telemetry channels with units, safety
 interlocks, and signed run manifests.
 
+## LAP — Lab Agent Protocol
+
+**What it is:** "LAP: An Agent-to-Instrument Protocol for Autonomous Science"
+([arXiv:2606.03755](https://arxiv.org/abs/2606.03755), Shiyanjia Lab, June
+2026) — a design specification for exactly the edge Labwire targets,
+positioned as the third edge alongside MCP (agent-to-tool) and A2A
+(agent-to-agent). Its four primitives are carefully thought through:
+**InstrumentCard** (a signed JSON-LD capability and physical-limit
+description, profiled on W3C WoT Thing Description 1.1 and served at
+`/.well-known`, with per-capability safety class, physical limits,
+interlocks, intent tags, and calibration block); first-class **reservation
+leases** (request/renew/release, epochs, exclusive vs shared-read); a
+**safety fence** of classes S0 (emergency operations, always permitted)
+through S3 (hazardous; requires a JWS operator token cryptographically bound
+to the exact task and the SHA-256 of canonical params), with error codes in
+a -33xxx JSON-RPC block; and **MeasurementResult** (mandatory UCUM unit
+codes and QUDT quantityKind on every value, calibration reference,
+uncertainty model, provenance manifest, signature). Transport is JSON-RPC
+2.0 over HTTPS + SSE with an A2A-compatible surface.
+
+**Status:** LAP is explicitly a specification: the paper states it has no
+implemented status, and its own comparison table lists its running
+implementation as "none (design)".
+
+**What Labwire adopts, with credit:** Labwire and LAP are independent
+convergent designs — JSON-RPC, capability discovery, declared interlocks,
+signed results — which we take as evidence the shape is right. Protocol
+v0.2 adopts two of LAP's ideas outright because they are better than what
+Labwire v0.1 had: **mandatory UCUM unit codes** on every quantity, and the
+**S0–S3 safety-class taxonomy** with confirmation required for S2/S3
+commands. Labwire v0.2 implements a simple confirmation token; LAP's
+cryptographically bound operator tokens are the more complete design and
+are on Labwire's roadmap.
+
+**What LAP has that Labwire does not:** reservation leases, calibration
+blocks, JSON-LD/WoT-profiled capability documents, and the full operator
+token binding — all roadmap candidates for Labwire, listed rather than
+claimed.
+
+## SCP — Science Context Protocol
+
+**What it is:** "SCP: Accelerating Discovery with a Global Web of
+Autonomous Scientific Agents"
+([arXiv:2512.24189](https://arxiv.org/abs/2512.24189), Shanghai AI Lab,
+December 2025) — extends MCP with a centralized SCP Hub registry, persistent
+experiment-lifecycle objects, and a device-driver abstraction, deployed on
+the Intern-Discovery platform with more than 1,600 integrated tool
+resources.
+
+**What SCP does better:** operating at platform scale, today, with a
+production deployment orders of magnitude beyond anything Labwire has run.
+
+**How Labwire differs:** architecture. SCP is hub-mediated — instrument
+access proxies through the Hub — where Labwire is deliberately hub-less:
+an agent speaks directly to an instrument server with no registry or
+central service in the path. Both shapes have merit; a hub gives fleet
+governance, a peer protocol gives five-minute adoption and no
+infrastructure dependency.
+
+## MCP tool wrapping (Hein lab)
+
+Work from the Hein lab (NeurIPS 2025 AI4Mat workshop) wraps self-driving-lab
+instrument APIs directly as MCP tools — independent confirmation that
+agent-native instrument interfaces are the need of the moment.
+<!-- TODO-VERIFY: full citation (authors/title) before adding a formal
+reference --> Plain MCP tool schemas, however, carry no physical typing,
+safety classes, reservations, or signed results; that gap is precisely what
+both LAP and Labwire, in their different ways, exist to fill.
+
 ## SiLA 2
 
 **What it is:** the established open standard for lab-instrument
@@ -112,15 +181,20 @@ and signed evidence, intended to sit *under* frameworks like it.
 
 ## Summary
 
-| | Transport | Discovery | AI-native | Signed results | Real hardware | Setup |
+| | Transport | Discovery | AI-native | Signed results | Running implementation | Setup |
 |---|---|---|---|---|---|---|
-| **Labwire v0.1** | JSON-RPC/WebSocket | JSON Schema | yes (MCP adapter) | yes (ed25519) | **no — simulated only** | ~5 min |
-| SiLA 2 | gRPC/HTTP2 | Feature definitions | no | no | yes, certified | toolchain required |
-| OPC-UA LADS | OPC UA | Information model | no | no | yes | industrial stack |
-| Bluesky/Ophyd | Python (in-process) | Ophyd classes | no | no | yes, production | Python framework |
-| PyLabRobot | Python (in-process) | Python classes | partial | no | yes | pip install |
+| **Labwire v0.2** | JSON-RPC/WebSocket | JSON Schema | yes (MCP adapter) | yes (ed25519) | yes — **simulated instruments only** | ~5 min |
+| LAP | JSON-RPC/HTTPS+SSE | JSON-LD (WoT TD) | yes (A2A surface) | yes (spec) | none (design) — per its own table | n/a |
+| SCP | MCP-based, hub-mediated | Hub registry | yes | no | yes, platform-scale | platform onboarding |
+| SiLA 2 | gRPC/HTTP2 | Feature definitions | no | no | yes, certified, real hardware | toolchain required |
+| OPC-UA LADS | OPC UA | Information model | no | no | yes, real hardware | industrial stack |
+| Bluesky/Ophyd | Python (in-process) | Ophyd classes | no | no | yes, production beamlines | Python framework |
+| PyLabRobot | Python (in-process) | Python classes | partial | no | yes, real robots | pip install |
 
-The last row worth internalizing: every mature system above controls real
-hardware; Labwire does not yet. What Labwire contributes is the combination —
-agent-native discovery, protocol-level safety semantics, and portable signed
-evidence — in a package small enough to evaluate in an afternoon.
+Two honest caveats worth internalizing: the mature pre-agent systems all
+control real hardware and Labwire does not yet; and among the agent-native
+efforts, LAP's design goes further than Labwire's in several dimensions
+(leases, calibration, operator-token binding) while Labwire is the one you
+can clone and run this afternoon. What Labwire contributes is the working
+combination — agent-native discovery, protocol-level safety semantics, and
+portable signed evidence — as running, tested code.
