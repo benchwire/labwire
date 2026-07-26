@@ -35,6 +35,11 @@ conformance table (SPEC §14.2) rather than implied to exist.
 
 - **`labwire-bluesky`** — an Ophyd-compatible device wrapper so Bluesky
   plans can drive Labwire instruments, and Labwire can expose Ophyd devices.
+- **ophyd bridge follow-ons** — `ophyd-async` support (only classic synchronous
+  ophyd is bridged today), array- and enum-valued signals (Labwire v0.2
+  channels carry scalars), and progress reporting from `MoveStatus.watch()`
+  (ophyd.sim reports no intermediate fractions, so the bridge does not yet
+  surface move progress).
 - **`labwire-pylabrobot`** — a bridge to PyLabRobot backends, which would
   also be the first path to Labwire driving real liquid-handling hardware.
 - **Real-hardware validation against a physical SCPI instrument.** Until

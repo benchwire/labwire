@@ -21,7 +21,9 @@ ophyd = ["ophyd>=1.9"]
 labwire-ophyd = "labwire.bridges.ophyd.cli:main"
 
 [dependency-groups]
-dev = ["ophyd>=1.9"]
+# caproto provides a pure-Python soft IOC and control layer, so the
+# Channel Access tests need no EPICS base install.
+dev = ["ophyd>=1.9", "caproto>=1.1"]
 
 [tool.uv.sources]
 labwire-core = { workspace = true }

@@ -76,11 +76,24 @@ Resolution, in order, with no silent defaults:
 A blank EGU — the commonest EPICS case — is treated as *absent*, never as
 `"1"`. Dimensionless is only ever asserted by a human in the annotation file.
 
-**Honest limitation:** `ophyd.sim` devices carry no `units` key at all
-(verified on `SynAxis` and `SynGauss`), so the auto-adopt path cannot be
-exercised by any simulated device. Its tests use a signal double that mirrors
-`EpicsSignalBase.describe()` exactly. Only a real Channel Access layer
-(milestone B5's caproto soft IOC) would prove it end to end.
+**Proven over Channel Access.** `ophyd.sim` devices carry no `units` key at
+all (verified on `SynAxis` and `SynGauss`), so simulation alone cannot
+exercise adoption. The package therefore runs a **real EPICS soft IOC**
+(caproto, pure Python, bound to localhost on an ephemeral port) with `.EGU`
+and control limits set on its PVs, connects ophyd's `EpicsSignal` to it over
+Channel Access using caproto's control layer, and asserts that:
+
+- `mm` is adopted straight from the device's EGU,
+- `degC` is *translated* to UCUM `Cel` rather than passed through,
+- control limits `(-25, 25)` are adopted from the IOC,
+- an EPICS device with units needs **no annotations at all**,
+- a read-only PV (`EpicsSignalRO`) is given no actuation command,
+- and the whole path — discover, read, actuate — works end to end through
+  Labwire.
+
+This is what separates "wraps ophyd objects" from "speaks to an actual EPICS
+layer". It is still a soft IOC: **no physical hardware and no beamline has
+ever been involved.**
 
 ## Safety classes (the second hard problem)
 
@@ -102,8 +115,11 @@ inference here has physical consequences.
 
 ## Known limitations
 
-- **Simulated devices only.** No claim is made about real EPICS hardware, any
-  beamline, or NSLS-II. Nothing enters the README that CI cannot demonstrate.
+- **No physical hardware.** The bridge is exercised against `ophyd.sim`
+  devices and against a pure-Python EPICS soft IOC. It has never been
+  connected to a real instrument, a real IOC, or any beamline, and no claim
+  about NSLS-II or any facility is made. Nothing enters the README that CI
+  cannot demonstrate.
 - **Classic synchronous ophyd only.** `ophyd-async` is future work, not
   attempted here.
 - ophyd is blocking, so every ophyd call runs in `asyncio.to_thread`; a
