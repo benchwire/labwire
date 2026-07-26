@@ -50,9 +50,10 @@ instruments, converges on the hidden yield optimum, and ends by verifying the
 winning run's signed bundle:
 
 ```
-  run 13  V= 15.0 V -> T= 68.0 degC   q=  127 uL/min   yield= 87.3%   best= 87.3%
-converged: best yield 87.3% at 15.0 V (68.0 degC), 127 uL/min in 14 experiments
-signed evidence: demo_runs/49b00ff2-...
+safety:      pump dispense is class S2 (irreversible); running under the operator standing grant
+  run 13  V= 15.0 V -> T= 68.0 degC   q=  127 uL/min   yield= 87.2%   best= 87.2%
+converged: best yield 87.2% at 15.0 V (68.0 degC), 127 uL/min in 14 experiments
+signed evidence: demo_runs/d3b15e9f-...
   labwire verify: OK - authentic
 ```
 
