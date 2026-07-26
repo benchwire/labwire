@@ -135,6 +135,8 @@ class DraftInstrument(BaseModel):
 
     identity: IdentityInfo
     device_class: str
+    class_mro: list[str] = []
+    """Dotted class paths, most specific first; annotations inherit along it."""
     components: list[DraftComponent]
     commands: list[DraftCommand]
     unresolved: list[Unresolved]
@@ -143,6 +145,15 @@ class DraftInstrument(BaseModel):
     def is_complete(self) -> bool:
         """Whether the device can be served with no annotations at all."""
         return not self.unresolved
+
+    def mro_root(self) -> str:
+        """The class path to key annotations by: the device's own class.
+
+        Example:
+            >>> # introspect(SynAxis(name="ax")).mro_root()
+            >>> # 'ophyd.sim.SynAxis'
+        """
+        return self.device_class
 
     def component(self, key: str) -> DraftComponent:
         """Look up a component by its ophyd data key.
@@ -362,9 +373,13 @@ def introspect(device: Any) -> DraftInstrument:
         serial_number=device.name,
         firmware_version=f"ophyd {_ophyd_version()}",
     )
+    mro = [
+        f"{cls.__module__}.{cls.__qualname__}" for cls in type(device).__mro__ if cls is not object
+    ]
     return DraftInstrument(
         identity=identity,
         device_class=device_class,
+        class_mro=mro,
         components=components,
         commands=_commands_for(device, components),
         unresolved=unresolved,

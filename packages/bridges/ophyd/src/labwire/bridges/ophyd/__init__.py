@@ -13,6 +13,17 @@ Example:
 """
 
 from labwire.bridges.ophyd._egu import egu_to_ucum
+from labwire.bridges.ophyd.annotations import (
+    AnnotationError,
+    AnnotationFile,
+    ComponentAnnotation,
+    DeviceAnnotation,
+    ResolvedCommand,
+    ResolvedComponent,
+    ResolvedInstrument,
+    load_annotations,
+    resolve,
+)
 from labwire.bridges.ophyd.introspect import (
     ComponentRole,
     DraftCommand,
@@ -24,12 +35,21 @@ from labwire.bridges.ophyd.introspect import (
 )
 
 __all__ = [
+    "AnnotationError",
+    "AnnotationFile",
+    "ComponentAnnotation",
     "ComponentRole",
+    "DeviceAnnotation",
     "DraftCommand",
     "DraftComponent",
     "DraftInstrument",
+    "ResolvedCommand",
+    "ResolvedComponent",
+    "ResolvedInstrument",
     "Unresolved",
     "UnresolvedReason",
     "egu_to_ucum",
     "introspect",
+    "load_annotations",
+    "resolve",
 ]
