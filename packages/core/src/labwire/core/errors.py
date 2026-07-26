@@ -133,6 +133,13 @@ class InternalError(LabwireError):
     category = "internal"
 
 
+class ConfirmationRequiredError(LabwireError):
+    """An S2/S3 command was submitted without an acceptable confirmation."""
+
+    code = -32009
+    category = "confirmation_required"
+
+
 class InvalidRequestError(LabwireError):
     """JSON-RPC -32600: structurally invalid request (e.g. duplicate initialize)."""
 

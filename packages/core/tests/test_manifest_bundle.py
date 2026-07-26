@@ -33,7 +33,7 @@ class Reactor(Instrument):
 
     temperature = channel("temperature", unit="Cel", description="Vessel temperature.")
 
-    @command(units={"target_c": "Cel"})
+    @command(units={"target_c": "Cel"}, returns_units={"reached_c": "Cel"})
     async def heat(self, ctx: CommandContext, target_c: float) -> dict[str, float]:
         """Ramp to a target temperature, streaming readings."""
         for step in (0.5, 0.9, 1.0):

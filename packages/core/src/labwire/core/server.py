@@ -36,15 +36,18 @@ from typing import Any, ClassVar, Concatenate, Protocol, cast
 
 from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
+    CONFIRMATION_REQUIRED_CLASSES,
     ChannelSpec,
     CommandSpec,
     IdentityInfo,
     InstrumentDescriptor,
     InterlockSpec,
+    SafetyClass,
 )
 from labwire.core.errors import (
     BusyError,
     CanceledError,
+    ConfirmationRequiredError,
     InterlockError,
     InternalError,
     InvalidParamsError,
@@ -92,10 +95,9 @@ def rfc3339(moment: datetime) -> str:
     """Format a UTC datetime as SPEC §9.2 requires.
 
     Example:
-            >>> from datetime import UTC, datetime
-    from pathlib import Path
-            >>> rfc3339(datetime(2026, 7, 23, 15, 30, tzinfo=UTC))
-            '2026-07-23T15:30:00.000000Z'
+        >>> from datetime import UTC, datetime
+        >>> rfc3339(datetime(2026, 7, 23, 15, 30, tzinfo=UTC))
+        '2026-07-23T15:30:00.000000Z'
     """
     return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -205,9 +207,12 @@ def channel(
     unit: str,
     dtype: str = "float64",
     description: str = "",
+    qudt_quantity_kind: str | None = None,
     sample_rate_hz_hint: float | None = None,
 ) -> TelemetryChannel:
     """Declare a typed measurement channel at class scope (SPEC §7.3).
+
+    ``unit`` MUST be a non-empty UCUM code (``"1"`` for dimensionless).
 
     Example:
         >>> mass = channel("mass", unit="g", description="Current mass.")
@@ -218,6 +223,7 @@ def channel(
             "description": description or name,
             "dtype": dtype,
             "unit": unit,
+            "qudt_quantity_kind": qudt_quantity_kind,
             "sample_rate_hz_hint": sample_rate_hz_hint,
         }
     )
@@ -352,6 +358,9 @@ def command[**P, R](
     title: str | None = None,
     description: str | None = None,
     units: dict[str, str] | None = None,
+    returns_units: dict[str, str] | None = None,
+    qudt_quantity_kind: dict[str, str] | None = None,
+    safety_class: SafetyClass = "S1",
     interruptible: bool = True,
     estimated_duration_s: float | None = None,
     clears_interlocks: list[str] | None = None,
@@ -370,12 +379,19 @@ def command[**P, R](
     description (docstring or ``description=``) is required: agents decide
     from it.
 
+    Every numeric parameter MUST have a UCUM code in ``units`` (``"1"`` for
+    dimensionless) and every named numeric result field one in
+    ``returns_units``; a declaration that omits one raises :class:`TypeError`
+    at import time rather than serving an ambiguous descriptor.
+    ``safety_class`` (SPEC §8.6, taxonomy from LAP) gates submission:
+    ``S2``/``S3`` commands require a confirmation value.
+
     Example:
         >>> class Valve(Instrument):
         ...     identity = IdentityInfo(
         ...         manufacturer="m", model="d", serial_number="s", firmware_version="1"
         ...     )
-        ...     @command(units={"position": "1"})
+        ...     @command(units={"position": "1"}, safety_class="S2")
         ...     async def move(self, ctx: CommandContext, position: float) -> None:
         ...         '''Move the valve.'''
     """
@@ -407,17 +423,28 @@ def command[**P, R](
                 f"command {fn.__name__!r} needs a docstring or description= — "
                 "agents decide when to use a command from its description"
             )
-        spec = CommandSpec(
-            name=name or fn.__name__,
-            title=title or fn.__name__.replace("_", " ").capitalize(),
-            description=resolved_description,
-            params_schema=params_schema,
-            unit_annotations=units or {},
-            returns_schema=returns_schema,
-            estimated_duration_s=estimated_duration_s,
-            interruptible=interruptible,
-            clears_interlocks=clears_interlocks or [],
-        )
+        try:
+            spec = CommandSpec(
+                name=name or fn.__name__,
+                title=title or fn.__name__.replace("_", " ").capitalize(),
+                description=resolved_description,
+                params_schema=params_schema,
+                unit_annotations=units or {},
+                returns_units=returns_units or {},
+                qudt_quantity_kind=qudt_quantity_kind or {},
+                safety_class=safety_class,
+                returns_schema=returns_schema,
+                estimated_duration_s=estimated_duration_s,
+                interruptible=interruptible,
+                clears_interlocks=clears_interlocks or [],
+            )
+        except PydanticValidationError as exc:
+            # Surface a declaration mistake as a plain TypeError at import time:
+            # the driver author, not an agent, is the audience here.
+            reasons = "; ".join(
+                str(error["msg"]).removeprefix("Value error, ") for error in exc.errors()
+            )
+            raise TypeError(f"invalid @command declaration on {fn.__name__!r}: {reasons}") from exc
         meta = CommandMeta(spec=spec, params_model=params_model, attr_name=fn.__name__)
         cast("_CommandFunc", fn).__labwire_command__ = meta
         return fn
@@ -521,6 +548,7 @@ class RunRecord(BaseModel):
     run_id: str
     command: str
     params: dict[str, Any]
+    safety_class: SafetyClass
     status: CommandState
     result: Any = None
     error: JsonRpcError | None = None
@@ -581,6 +609,7 @@ class _Run:
             run_id=self.run_id,
             command=self.meta.spec.name,
             params=self.params,
+            safety_class=self.meta.spec.safety_class,
             status=self.status,
             result=self.result,
             error=self.error,
@@ -659,10 +688,12 @@ class InstrumentServer:
         server_name: str = "labwire-server",
         manifest_dir: Path | str | None = None,
         signing_key: SigningKey | None = None,
+        confirmation_token: str | None = None,
     ) -> None:
         self.instrument = instrument
         self.clock: Clock = clock if clock is not None else SystemClock()
         self.server_name = server_name
+        self._confirmation_token = confirmation_token
         self._manifest_dir = Path(manifest_dir) if manifest_dir is not None else None
         self._signing_key = signing_key
         if self._manifest_dir is not None and self._signing_key is None:
@@ -857,14 +888,27 @@ class InstrumentServer:
                 f"params for {submit.command!r} failed validation",
                 details={"errors": _pydantic_error_details(exc)},
             ) from exc
+        if meta.spec.safety_class in CONFIRMATION_REQUIRED_CLASSES and not self._confirmed(
+            submit.confirmation
+        ):
+            raise ConfirmationRequiredError(
+                f"command {submit.command!r} is {meta.spec.safety_class} and requires "
+                "an operator confirmation value",
+                details={"safety_class": meta.spec.safety_class},
+            )
         tripped = {
             lock.name
             for lock in self.instrument._interlocks.values()  # pyright: ignore[reportPrivateUsage]
             if lock.tripped
         }
-        # SPEC §8.5: a command clearing ANY currently tripped interlock stays
-        # submittable — otherwise two tripped soft interlocks deadlock recovery.
-        if tripped and not (tripped & set(meta.spec.clears_interlocks)):
+        # SPEC §8.5/§8.6: a command clearing ANY currently tripped interlock stays
+        # submittable (otherwise two tripped soft interlocks deadlock recovery), and
+        # S0 commands stay submittable because they are the means of recovery.
+        if (
+            tripped
+            and meta.spec.safety_class != "S0"
+            and not (tripped & set(meta.spec.clears_interlocks))
+        ):
             raise InterlockError(f"interlock tripped: {', '.join(sorted(tripped))}")
         if len(self._active_runs()) >= self.instrument.max_concurrent_commands:
             raise BusyError(
@@ -880,6 +924,19 @@ class InstrumentServer:
         run.task.add_done_callback(lambda _task, r=run: self._reap_run(r))
         self._track(run.task)
         return {"command_id": run.run_id, "status": "accepted"}
+
+    def _confirmed(self, confirmation: str | None) -> bool:
+        """Whether a submitted confirmation value is acceptable (SPEC §8.6).
+
+        Deployment policy: with a token configured the value must match it;
+        without one, any non-empty value is accepted. Either way this proves
+        deployment policy, not operator identity — see SPEC §13.
+        """
+        if confirmation is None or not confirmation.strip():
+            return False
+        if self._confirmation_token is None:
+            return True
+        return confirmation == self._confirmation_token
 
     def _reap_run(self, run: _Run) -> None:
         # Safety net: a run task must never die leaving the run non-terminal
@@ -958,7 +1015,11 @@ class InstrumentServer:
             "protocol_version": PROTOCOL_VERSION,
             "run_id": run.run_id,
             "instrument": self.instrument.identity.model_dump(mode="json", exclude_none=True),
-            "command": {"name": run.meta.spec.name, "params": run.params},
+            "command": {
+                "name": run.meta.spec.name,
+                "params": run.params,
+                "safety_class": run.meta.spec.safety_class,
+            },
             "status": run.status,
             "data": {
                 "digest_alg": "sha256",

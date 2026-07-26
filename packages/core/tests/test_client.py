@@ -29,7 +29,7 @@ class Stirrer(Instrument):
 
     rpm = channel("rpm", unit="1/min", description="Rotor speed.")
 
-    @command()
+    @command(units={"target_rpm": "1/min"}, returns_units={"reached_rpm": "1/min"})
     async def spin(self, ctx: CommandContext, target_rpm: float) -> dict[str, float]:
         """Spin up, streaming rpm, and report the reached speed."""
         for step in (0.25, 0.5, 0.75, 1.0):

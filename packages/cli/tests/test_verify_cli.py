@@ -27,7 +27,7 @@ class Clicker(Instrument):
         firmware_version="0.1.0",
     )
 
-    @command()
+    @command(units={"times": "1"}, returns_units={"clicked": "1"})
     async def click(self, ctx: CommandContext, times: int = 1) -> dict[str, int]:
         """Click a relay."""
         ctx.emit_event("x-sim/click", "info", {"times": times})

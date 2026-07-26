@@ -50,7 +50,7 @@ class Doser(Instrument):
         """Record that the lifecycle hook ran."""
         self.started_background = True
 
-    @command()
+    @command(units={"volume_ul": "uL"}, returns_units={"dosed_ul": "uL"})
     async def dose(self, ctx: CommandContext, volume_ul: float = 1.0) -> dict[str, float]:
         """Dose a volume."""
         return {"dosed_ul": volume_ul}

@@ -332,13 +332,23 @@ class LabwireClient:
         raw = await self._request("instrument/describe", {})
         return InstrumentDescriptor.model_validate(raw)
 
-    async def submit(self, command: str, params: dict[str, Any]) -> CommandHandle:
+    async def submit(
+        self, command: str, params: dict[str, Any], *, confirmation: str | None = None
+    ) -> CommandHandle:
         """Submit a command and return a handle to its run (SPEC §8.2).
 
+        ``confirmation`` is REQUIRED for commands whose ``safety_class`` is
+        ``S2`` or ``S3`` (SPEC §8.6); omitting it raises
+        :class:`ConfirmationRequiredError`.
+
         Example:
-            >>> # handle = await client.submit("dispense", {"volume_ul": 500.0})
+            >>> # handle = await client.submit("dispense", {"volume_ul": 500.0},
+            >>> #                              confirmation="standing-grant")
         """
-        raw = await self._request("command/submit", {"command": command, "params": params})
+        payload: dict[str, Any] = {"command": command, "params": params}
+        if confirmation is not None:
+            payload["confirmation"] = confirmation
+        raw = await self._request("command/submit", payload)
         result = SubmitResult.model_validate(raw)
         handle = CommandHandle(self, result.command_id)
         self._handles[result.command_id] = handle

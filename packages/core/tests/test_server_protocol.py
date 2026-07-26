@@ -41,7 +41,7 @@ class Rig(Instrument):
         super().__init__()
         self.release = asyncio.Event()
 
-    @command()
+    @command(units={"a": "1", "b": "1"}, returns_units={"sum": "1"})
     async def add(self, ctx: CommandContext, a: float, b: float) -> dict[str, float]:
         """Add two numbers instantly."""
         return {"sum": a + b}
@@ -78,7 +78,7 @@ class _Client:
         result: dict[str, Any] = await self.session.request(
             "initialize",
             {
-                "protocol_version": "0.1",
+                "protocol_version": "0.2",
                 "client_info": {"name": "test", "version": "0"},
                 "capabilities": {},
             },
@@ -145,12 +145,12 @@ async def test_initialize_result_and_gating() -> None:
         result = await session.request(
             "initialize",
             {
-                "protocol_version": "0.1",
+                "protocol_version": "0.2",
                 "client_info": {"name": "t", "version": "0"},
                 "capabilities": {},
             },
         )
-        assert result["protocol_version"] == "0.1"
+        assert result["protocol_version"] == "0.2"
         assert result["capabilities"] == {"telemetry": True, "events": True, "manifests": False}
         await session.notify("notifications/initialized", {})
         desc = await session.request("instrument/describe", {})

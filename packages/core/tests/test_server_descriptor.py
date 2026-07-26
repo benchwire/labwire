@@ -23,6 +23,7 @@ class Pump(Instrument):
     @command(
         title="Dispense volume",
         units={"volume_ul": "uL", "rate_ul_min": "uL/min"},
+        returns_units={"dispensed_ul": "uL"},
         estimated_duration_s=30.0,
     )
     async def dispense(

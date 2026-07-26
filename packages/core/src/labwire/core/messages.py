@@ -77,6 +77,7 @@ class SubmitParams(_Msg):
 
     command: str
     params: dict[str, Any]
+    confirmation: str | None = None
 
 
 class SubmitResult(_Msg):

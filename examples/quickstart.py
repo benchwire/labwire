@@ -37,7 +37,11 @@ class SimBalance(Instrument):
 
     mass = channel("mass", unit="g", description="Current mass reading.")
 
-    @command(units={"settle_s": "s"}, estimated_duration_s=2.0)
+    @command(
+        units={"settle_s": "s"},
+        returns_units={"mass_g": "g"},
+        estimated_duration_s=2.0,
+    )
     async def measure(self, ctx: CommandContext, settle_s: float = 0.5) -> dict[str, float]:
         """Let the reading stabilize, streaming samples, then report the mass."""
         reading = 0.0

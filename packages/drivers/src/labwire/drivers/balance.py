@@ -42,7 +42,12 @@ class Balance(Instrument):
         firmware_version="0.1.0",
     )
 
-    mass = channel("mass", unit="g", description="Continuously sampled net mass.")
+    mass = channel(
+        "mass",
+        unit="g",
+        description="Continuously sampled net mass.",
+        qudt_quantity_kind="Mass",
+    )
     overload = interlock(
         "overload",
         description="Pan load exceeds capacity. Clears when the excess mass is removed.",
@@ -85,7 +90,11 @@ class Balance(Instrument):
                     self.mass.publish(reading[1])
             await server.clock.sleep(_POLL_S)
 
-    @command(units={"settle_timeout_s": "s"}, estimated_duration_s=5.0)
+    @command(
+        units={"settle_timeout_s": "s"},
+        returns_units={"mass_g": "g"},
+        estimated_duration_s=5.0,
+    )
     async def measure(
         self, ctx: CommandContext, settle_timeout_s: float = 10.0
     ) -> dict[str, float]:
@@ -104,7 +113,7 @@ class Balance(Instrument):
             waited += _POLL_S
         raise DeviceTimeoutError(f"no stable reading within {settle_timeout_s} s")
 
-    @command(units={"settle_timeout_s": "s"})
+    @command(units={"settle_timeout_s": "s"}, returns_units={"tare_g": "g"})
     async def tare(self, ctx: CommandContext, settle_timeout_s: float = 10.0) -> dict[str, float]:
         """Tare the balance, waiting for the pan to stabilize first.
 
@@ -122,7 +131,13 @@ class Balance(Instrument):
             waited += _POLL_S
         raise DeviceTimeoutError(f"pan did not stabilize within {settle_timeout_s} s")
 
-    @command(name="x-sim/load", units={"mass_g": "g"}, clears_interlocks=["overload"])
+    @command(
+        name="x-sim/load",
+        units={"mass_g": "g"},
+        returns_units={"loaded_g": "g"},
+        clears_interlocks=["overload"],
+        safety_class="S0",  # simulation control and the overload recovery path
+    )
     async def load(self, ctx: CommandContext, mass_g: float) -> dict[str, float]:
         """Place a mass on the pan (simulation-only vendor extension).
 

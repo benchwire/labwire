@@ -6,16 +6,18 @@ Wrap any device in the protocol with :class:`Instrument` and
 Example:
     >>> from labwire.core import PROTOCOL_VERSION
     >>> PROTOCOL_VERSION
-    '0.1'
+    '0.2'
 """
 
 from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
+    CONFIRMATION_REQUIRED_CLASSES,
     ChannelSpec,
     CommandSpec,
     IdentityInfo,
     InstrumentDescriptor,
     InterlockSpec,
+    SafetyClass,
 )
 from labwire.core.client import (
     CommandHandle,
@@ -27,6 +29,7 @@ from labwire.core.client import (
 from labwire.core.errors import (
     BusyError,
     CanceledError,
+    ConfirmationRequiredError,
     DeviceTimeoutError,
     HardwareFaultError,
     InterlockError,
@@ -77,6 +80,7 @@ from labwire.core.signing import (
 from labwire.core.transport import MemoryTransport, Transport, TransportClosed, WebSocketTransport
 
 __all__ = [
+    "CONFIRMATION_REQUIRED_CLASSES",
     "MANIFEST_VERSION",
     "MESSAGE_TYPES",
     "PROTOCOL_VERSION",
@@ -89,6 +93,7 @@ __all__ = [
     "CommandSpec",
     "CommandState",
     "CommandStatus",
+    "ConfirmationRequiredError",
     "DeviceTimeoutError",
     "EventNotification",
     "EventSeverity",
@@ -114,6 +119,7 @@ __all__ = [
     "PeerInfo",
     "Progress",
     "RunRecord",
+    "SafetyClass",
     "ServerCapabilities",
     "SessionClosed",
     "SigningKey",

@@ -38,7 +38,7 @@ class Balance(Instrument):
         super().__init__()
         self.proceed = asyncio.Event()
 
-    @command()
+    @command(units={"samples": "1"}, returns_units={"mass_g": "g"})
     async def measure(self, ctx: CommandContext, samples: int = 3) -> dict[str, float]:
         """Stream ``samples`` mass readings, then report the last one."""
         reading = 0.0

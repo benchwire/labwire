@@ -14,13 +14,15 @@ from labwire.core import (
 from labwire.drivers import SyringePump
 from labwire.sim import SimSyringePump
 
+GRANT = "test-standing-grant"
+
 
 @pytest.fixture
 async def rig() -> AsyncIterator[tuple[SimSyringePump, InstrumentServer, LabwireClient]]:
     sim = SimSyringePump(seed=1)
     await sim.start()
     pump = SyringePump("127.0.0.1", sim.port)
-    server = InstrumentServer(pump)
+    server = InstrumentServer(pump, confirmation_token=GRANT)
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
     async with LabwireClient.attach(client_end) as client:
@@ -49,7 +51,9 @@ async def test_dispense_completes_with_requested_volume(
 ) -> None:
     _sim, _server, client = rig
     async with client.telemetry(["flow_rate", "dispensed"]) as sub:
-        handle = await client.submit("dispense", {"volume_ul": 200.0, "rate_ul_min": 60000.0})
+        handle = await client.submit(
+            "dispense", {"volume_ul": 200.0, "rate_ul_min": 60000.0}, confirmation=GRANT
+        )
         result = await handle.result(timeout=10.0)
         assert result["dispensed_ul"] == pytest.approx(200.0, rel=0.05)
         flowing: list[float] = []
@@ -65,8 +69,7 @@ async def test_cancel_mid_dispense_stops_the_pump(
 ) -> None:
     sim, _server, client = rig
     handle = await client.submit(
-        "dispense",
-        {"volume_ul": 5000.0, "rate_ul_min": 6000.0},  # would take 50 s
+        "dispense", {"volume_ul": 5000.0, "rate_ul_min": 6000.0}, confirmation=GRANT
     )
     await asyncio.sleep(0.3)
     await handle.cancel()
@@ -82,16 +85,22 @@ async def test_occlusion_faults_the_run_and_blocks_submits_until_cleared(
     _sim, _server, client = rig
     inject = await client.submit("x-sim/inject_fault", {"kind": "occlusion"})
     await inject.result(timeout=5.0)
-    handle = await client.submit("dispense", {"volume_ul": 1000.0, "rate_ul_min": 6000.0})
+    handle = await client.submit(
+        "dispense", {"volume_ul": 1000.0, "rate_ul_min": 6000.0}, confirmation=GRANT
+    )
     with pytest.raises(InterlockError):
         await handle.result(timeout=10.0)
     desc = await client.describe()
     assert desc.interlocks[0].tripped is True
     with pytest.raises(InterlockError):  # ordinary submits blocked while tripped
-        await client.submit("dispense", {"volume_ul": 10.0, "rate_ul_min": 6000.0})
+        await client.submit(
+            "dispense", {"volume_ul": 10.0, "rate_ul_min": 6000.0}, confirmation=GRANT
+        )
     clearing = await client.submit("clear_occlusion", {})
     assert (await clearing.result(timeout=5.0))["cleared"] is True
-    retry = await client.submit("dispense", {"volume_ul": 50.0, "rate_ul_min": 60000.0})
+    retry = await client.submit(
+        "dispense", {"volume_ul": 50.0, "rate_ul_min": 60000.0}, confirmation=GRANT
+    )
     result = await retry.result(timeout=10.0)
     assert result["dispensed_ul"] == pytest.approx(50.0, rel=0.05)
 
@@ -100,7 +109,9 @@ async def test_fault_injected_after_cancel_does_not_stall_idle_pump(
     rig: tuple[SimSyringePump, InstrumentServer, LabwireClient],
 ) -> None:
     sim, _server, client = rig
-    handle = await client.submit("dispense", {"volume_ul": 5000.0, "rate_ul_min": 6000.0})
+    handle = await client.submit(
+        "dispense", {"volume_ul": 5000.0, "rate_ul_min": 6000.0}, confirmation=GRANT
+    )
     await asyncio.sleep(0.1)
     await handle.cancel()
     with pytest.raises(CanceledError):
@@ -115,7 +126,9 @@ async def test_dispensed_volume_has_realistic_error(
     rig: tuple[SimSyringePump, InstrumentServer, LabwireClient],
 ) -> None:
     _sim, _server, client = rig
-    handle = await client.submit("dispense", {"volume_ul": 300.0, "rate_ul_min": 90000.0})
+    handle = await client.submit(
+        "dispense", {"volume_ul": 300.0, "rate_ul_min": 90000.0}, confirmation=GRANT
+    )
     result = await handle.result(timeout=10.0)
     # realistic, seeded: close to target but not bit-exact
     assert result["dispensed_ul"] != 300.0

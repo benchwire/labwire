@@ -12,7 +12,13 @@ Run it (zero hardware):
 
 import asyncio
 
-from labwire.core import CanceledError, InstrumentServer, InterlockError, LabwireClient
+from labwire.core import (
+    CanceledError,
+    ConfirmationRequiredError,
+    InstrumentServer,
+    InterlockError,
+    LabwireClient,
+)
 from labwire.drivers import SyringePump
 from labwire.sim import SimSyringePump
 
@@ -30,7 +36,10 @@ async def main() -> None:
     """Drive a pump over WebSocket: stream, cancel, trip, recover."""
     sim = SimSyringePump(seed=42)
     await sim.start()
-    server = InstrumentServer(SyringePump("127.0.0.1", sim.port))
+    # dispense is safety class S2 (SPEC §8.6): the operator issues one token for
+    # this session, and every dispense submission must present it.
+    grant = "operator-confirmation-example"
+    server = InstrumentServer(SyringePump("127.0.0.1", sim.port), confirmation_token=grant)
     async with server.serve_websocket("127.0.0.1", 0) as ws_server:
         port = ws_server.sockets[0].getsockname()[1]
         print(f"instrument server: ws://127.0.0.1:{port}")
@@ -39,7 +48,9 @@ async def main() -> None:
             watcher = asyncio.create_task(watch_telemetry(client, stop))
 
             print("\n1) start a long dispense, then cancel it mid-run")
-            handle = await client.submit("dispense", {"volume_ul": 5000.0, "rate_ul_min": 6000.0})
+            handle = await client.submit(
+                "dispense", {"volume_ul": 5000.0, "rate_ul_min": 6000.0}, confirmation=grant
+            )
             await asyncio.sleep(0.5)
             await handle.cancel()
             try:
@@ -47,23 +58,35 @@ async def main() -> None:
             except CanceledError:
                 print("  canceled cleanly; motor stopped")
 
-            print("\n2) inject an occlusion fault and watch the interlock trip")
+            print("\n2) an S2 command without confirmation is refused outright")
+            try:
+                await client.submit("dispense", {"volume_ul": 1.0, "rate_ul_min": 6000.0})
+            except ConfirmationRequiredError as exc:
+                print(f"  refused: {exc}")
+
+            print("\n3) inject an occlusion fault and watch the interlock trip")
             inject = await client.submit("x-sim/inject_fault", {"kind": "occlusion"})
             await inject.result(timeout=10.0)
-            stalled = await client.submit("dispense", {"volume_ul": 500.0, "rate_ul_min": 6000.0})
+            stalled = await client.submit(
+                "dispense", {"volume_ul": 500.0, "rate_ul_min": 6000.0}, confirmation=grant
+            )
             try:
                 await stalled.result(timeout=10.0)
             except InterlockError as exc:
                 print(f"  run failed as designed: {exc}")
             try:
-                await client.submit("dispense", {"volume_ul": 10.0, "rate_ul_min": 6000.0})
+                await client.submit(
+                    "dispense", {"volume_ul": 10.0, "rate_ul_min": 6000.0}, confirmation=grant
+                )
             except InterlockError:
                 print("  submits are blocked while the interlock is tripped")
 
-            print("\n3) recover with the declared clearing command and finish a run")
+            print("\n4) recover with the declared clearing command and finish a run")
             clearing = await client.submit("clear_occlusion", {})
             await clearing.result(timeout=10.0)
-            retry = await client.submit("dispense", {"volume_ul": 100.0, "rate_ul_min": 60000.0})
+            retry = await client.submit(
+                "dispense", {"volume_ul": 100.0, "rate_ul_min": 60000.0}, confirmation=grant
+            )
             result = await retry.result(timeout=10.0)
             print(f"  dispensed {result['dispensed_ul']:.1f} uL after recovery")
 

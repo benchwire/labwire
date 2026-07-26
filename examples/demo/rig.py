@@ -20,6 +20,11 @@ from labwire.drivers import Balance, PowerSupply, SyringePump
 from labwire.sim import ScaledClock, SimBalance, SimPowerSupply, SimSyringePump
 
 DISPENSE_UL = 40.0
+# The pump's dispense is safety class S2 (irreversible: it consumes reagent), so
+# every submission needs an operator confirmation (SPEC §8.6). A long-running
+# campaign uses a standing grant — one token the operator issues for the whole
+# session — rather than confirming each of a dozen runs by hand.
+STANDING_GRANT = "operator-standing-grant-demo"
 VOLT_RANGE = (5.0, 25.0)
 RATE_RANGE = (80.0, 240.0)
 
@@ -99,6 +104,7 @@ class DemoRig:
             server = InstrumentServer(
                 driver,
                 clock=rig.clock,
+                confirmation_token=STANDING_GRANT,
                 # the balance produces the signed evidence for each measurement
                 manifest_dir=manifest_dir if index == 2 else None,
             )
@@ -118,7 +124,7 @@ class DemoRig:
         await self._stack.aclose()
 
     async def _run(self, client: LabwireClient, name: str, params: dict[str, Any]) -> Any:
-        handle = await client.submit(name, params)
+        handle = await client.submit(name, params, confirmation=STANDING_GRANT)
         return await handle.result(timeout=120.0)
 
     async def run_experiment(self, *, volts: float, rate_ul_min: float) -> ExperimentResult:

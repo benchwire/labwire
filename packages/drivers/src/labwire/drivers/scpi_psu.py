@@ -43,8 +43,15 @@ class PowerSupply(Instrument):
         firmware_version="0.1.0",
     )
 
-    voltage = channel("voltage", unit="V", description="Measured output voltage.")
-    current = channel("current", unit="A", description="Measured output current.")
+    voltage = channel(
+        "voltage", unit="V", description="Measured output voltage.", qudt_quantity_kind="Voltage"
+    )
+    current = channel(
+        "current",
+        unit="A",
+        description="Measured output current.",
+        qudt_quantity_kind="ElectricCurrent",
+    )
     over_current = interlock(
         "over_current",
         description="Over-current protection latched the output off. Cleared by clear_protection.",
@@ -85,7 +92,12 @@ class PowerSupply(Instrument):
                 self.current.publish(float(await self._cmd("MEAS:CURR?")))
             await server.clock.sleep(_POLL_S)
 
-    @command(units={"volts": "V"}, estimated_duration_s=2.0)
+    @command(
+        units={"volts": "V"},
+        returns_units={"volts": "V"},
+        qudt_quantity_kind={"volts": "Voltage"},
+        estimated_duration_s=2.0,
+    )
     async def set_voltage(self, ctx: CommandContext, volts: float) -> dict[str, float]:
         """Set the voltage setpoint and wait for the output to settle.
 
@@ -107,7 +119,7 @@ class PowerSupply(Instrument):
             waited += _POLL_S
         raise DeviceTimeoutError(f"output did not settle to {volts} V")
 
-    @command(units={"amps": "A"})
+    @command(units={"amps": "A"}, returns_units={"amps": "A"})
     async def set_current_limit(self, ctx: CommandContext, amps: float) -> dict[str, float]:
         """Set the current limit (constant-current threshold).
 
@@ -117,7 +129,7 @@ class PowerSupply(Instrument):
         await self._cmd(f"CURR {amps}")
         return {"amps": amps}
 
-    @command()
+    @command(returns_units={"on": "1"})
     async def output(self, ctx: CommandContext, on: bool) -> dict[str, float]:
         """Enable or disable the output.
 
@@ -127,7 +139,7 @@ class PowerSupply(Instrument):
         await self._cmd(f"OUTP {'ON' if on else 'OFF'}")
         return {"on": float(int(on))}
 
-    @command()
+    @command(returns_units={"volts": "V", "amps": "A"})
     async def measure(self, ctx: CommandContext) -> dict[str, float]:
         """Measure output voltage and current.
 
@@ -138,7 +150,7 @@ class PowerSupply(Instrument):
         amps = float(await self._cmd("MEAS:CURR?"))
         return {"volts": volts, "amps": amps}
 
-    @command(clears_interlocks=["over_current"])
+    @command(clears_interlocks=["over_current"], safety_class="S0")
     async def clear_protection(self, ctx: CommandContext) -> dict[str, bool]:
         """Reset latched over-current protection.
 
@@ -149,7 +161,7 @@ class PowerSupply(Instrument):
         self.over_current.clear()
         return {"cleared": True}
 
-    @command(name="x-sim/set_load", units={"ohms": "Ohm"})
+    @command(name="x-sim/set_load", units={"ohms": "Ohm"}, returns_units={"ohms": "Ohm"})
     async def set_load(self, ctx: CommandContext, ohms: float) -> dict[str, float]:
         """Connect a resistive load (simulation-only vendor extension).
 

@@ -41,9 +41,17 @@ class SyringePump(Instrument):
     )
 
     flow_rate = channel(
-        "flow_rate", unit="uL/min", description="Commanded flow rate while running."
+        "flow_rate",
+        unit="uL/min",
+        description="Commanded flow rate while running.",
+        qudt_quantity_kind="VolumeFlowRate",
     )
-    dispensed = channel("dispensed", unit="uL", description="Cumulative dispensed volume this run.")
+    dispensed = channel(
+        "dispensed",
+        unit="uL",
+        description="Cumulative dispensed volume this run.",
+        qudt_quantity_kind="Volume",
+    )
     occlusion = interlock(
         "occlusion",
         description="Line occlusion stalled the motor. Cleared by clear_occlusion.",
@@ -82,6 +90,9 @@ class SyringePump(Instrument):
 
     @command(
         units={"volume_ul": "uL", "rate_ul_min": "uL/min"},
+        returns_units={"dispensed_ul": "uL"},
+        qudt_quantity_kind={"volume_ul": "Volume", "rate_ul_min": "VolumeFlowRate"},
+        safety_class="S2",  # consumes reagent: irreversible (SPEC §8.6)
         estimated_duration_s=60.0,
     )
     async def dispense(
@@ -111,7 +122,7 @@ class SyringePump(Instrument):
             await ctx.progress(min(dispensed / volume_ul, 1.0))
             await ctx.sleep(_POLL_S)
 
-    @command(clears_interlocks=["occlusion"])
+    @command(clears_interlocks=["occlusion"], safety_class="S0")
     async def clear_occlusion(self, ctx: CommandContext) -> dict[str, bool]:
         """Clear a stalled line after the occlusion has been resolved.
 

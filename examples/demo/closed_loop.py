@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from labwire.core import verify_bundle
-from rig import RATE_RANGE, VOLT_RANGE, DemoRig, ExperimentResult
+from rig import RATE_RANGE, STANDING_GRANT, VOLT_RANGE, DemoRig, ExperimentResult
 
 
 async def optimize(rig: DemoRig, budget: int) -> list[ExperimentResult]:
@@ -69,6 +69,10 @@ async def main() -> None:
     manifest_dir = Path(os.environ.get("DEMO_RUNS_DIR", "demo_runs"))
     print("labwire closed-loop demo: maximize reaction yield over (voltage, flow rate)")
     print("instruments: SimPSU-3005 (heater), SimPump-200 (reagent), SimBalance-120 (product)")
+    print(
+        f"safety:      pump dispense is class S2 (irreversible); running under the "
+        f"operator standing grant {STANDING_GRANT!r}"
+    )
     async with await DemoRig.start(manifest_dir, time_scale=240.0 if fast else 60.0) as demo_rig:
         results = await optimize(demo_rig, budget)
         best = max(results, key=lambda r: r.product_g)

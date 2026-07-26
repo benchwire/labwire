@@ -22,6 +22,7 @@ from labwire.core import CommandSpec, LabwireClient, LabwireError, verify_bundle
 from rig import (
     DISPENSE_UL,
     RATE_RANGE,
+    STANDING_GRANT,
     VOLT_RANGE,
     DemoRig,
     reactor_temp_c,
@@ -41,7 +42,10 @@ the product collected after each dispense.
 Procedure for ONE experiment:
 1. psu_set_voltage (allowed {VOLT_RANGE[0]}-{VOLT_RANGE[1]} V; also ensure psu_output on once)
 2. pump_dispense with volume_ul={DISPENSE_UL} and your chosen rate_ul_min \
-(allowed {RATE_RANGE[0]}-{RATE_RANGE[1]})
+(allowed {RATE_RANGE[0]}-{RATE_RANGE[1]}). This command is safety class S2 \
+(irreversible: it consumes reagent), so it also needs \
+confirmation="{STANDING_GRANT}" — the standing grant the operator issued for \
+this session.
 3. balance_measure to weigh the product (the harness collects it onto the balance)
 
 Theoretical maximum product is {DISPENSE_UL * 0.005:.3f} g per experiment. Run at most \
@@ -70,11 +74,23 @@ async def build_tools(
                 continue
             name = f"{label}_{_sanitize(spec.name)}"
             registry[name] = (client, spec)
+            schema = dict(spec.params_schema)
+            note = f" Safety class {spec.safety_class}."
+            if spec.safety_class in ("S2", "S3"):
+                properties = dict(schema.get("properties", {}))
+                properties["confirmation"] = {
+                    "type": "string",
+                    "description": "Operator confirmation string (required for S2/S3).",
+                }
+                schema["properties"] = properties
+                note += " Requires a confirmation value."
             tools.append(
                 {
                     "name": name,
-                    "description": f"{spec.description.strip()} [{descriptor.identity.model}]",
-                    "input_schema": spec.params_schema,
+                    "description": (
+                        f"{spec.description.strip()}{note} [{descriptor.identity.model}]"
+                    ),
+                    "input_schema": schema,
                 }
             )
     return tools, registry
@@ -88,14 +104,20 @@ async def execute_tool(
 ) -> str:
     """Run one tool call through the protocol; the harness reacts the chemistry."""
     client, spec = registry[name]
+    payload = dict(arguments)
+    confirmation = payload.pop("confirmation", None)
     try:
-        handle = await client.submit(spec.name, arguments)
+        handle = await client.submit(
+            spec.name,
+            payload,
+            confirmation=str(confirmation) if confirmation is not None else None,
+        )
         result = await handle.result(timeout=120.0)
     except (LabwireError, TimeoutError) as exc:
         return f"ERROR: {exc}"
     if spec.name == "dispense":
         # chemistry happens between devices: product lands on the balance
-        psu = await rig.psu_client.submit("measure", {})
+        psu = await rig.psu_client.submit("measure", {}, confirmation=STANDING_GRANT)
         volts = float((await psu.result(timeout=30.0))["volts"])
         temp_c = reactor_temp_c(volts)
         product_g = (
@@ -106,7 +128,7 @@ async def execute_tool(
             ("tare", {}),
             ("x-sim/load", {"mass_g": product_g}),
         ]:
-            step = await rig.balance_client.submit(prep, params)
+            step = await rig.balance_client.submit(prep, params, confirmation=STANDING_GRANT)
             await step.result(timeout=30.0)
     return json.dumps(result)
 

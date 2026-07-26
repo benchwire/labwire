@@ -16,6 +16,7 @@ import json
 from pathlib import Path
 from typing import Any, Self, cast
 
+from labwire.core._meta import MANIFEST_VERSION as MANIFEST_VERSION
 from labwire.core.capabilities import IdentityInfo
 from labwire.core.jcs import jcs_canonical
 from labwire.core.messages import CommandState
@@ -24,8 +25,6 @@ from nacl.exceptions import BadSignatureError
 from nacl.signing import SigningKey as _NaclSigningKey
 from nacl.signing import VerifyKey
 from pydantic import BaseModel, ConfigDict
-
-MANIFEST_VERSION = "0.1"
 
 
 def _b64url(data: bytes) -> str:
@@ -97,10 +96,11 @@ class _M(BaseModel):
 
 
 class ManifestCommand(_M):
-    """The submitted command, verbatim (SPEC §12.1)."""
+    """The submitted command, verbatim, and its enforced class (SPEC §12.1)."""
 
     name: str
     params: dict[str, Any]
+    safety_class: str | None = None
 
 
 class ManifestData(_M):
