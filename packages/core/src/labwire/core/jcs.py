@@ -12,11 +12,15 @@ Example:
 
 import json
 import math
+import operator
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, SupportsFloat, SupportsIndex, cast
 
 
-def _jcs_number(value: float) -> str:
+def _jcs_number(raw: float) -> str:
+    # Normalize float subclasses (numpy scalars, most importantly): their repr
+    # is not a JSON number, and this string is what gets signed.
+    value = float(raw)
     if math.isnan(value) or math.isinf(value):
         raise ValueError("non-finite numbers are not representable in JSON")
     if value == 0:
@@ -50,7 +54,7 @@ def jcs_dumps(value: Any) -> str:
         case int():
             return str(value)
         case float():
-            return _jcs_number(value)
+            return _jcs_number(value)  # float subclasses normalize inside
         case str():
             return json.dumps(value, ensure_ascii=False)
         case list() | tuple():
@@ -64,6 +68,12 @@ def jcs_dumps(value: Any) -> str:
             ]
             return "{" + ",".join(parts) + "}"
         case _:
+            # Numeric types that do not subclass int/float — numpy integers are
+            # the common case in scientific Python — are still real numbers.
+            if hasattr(value, "__index__"):
+                return str(operator.index(cast("SupportsIndex", value)))
+            if hasattr(value, "__float__"):
+                return _jcs_number(float(cast("SupportsFloat", value)))
             raise TypeError(f"not JSON-serializable: {type(value).__name__}")
 
 

@@ -44,3 +44,33 @@ def test_non_finite_numbers_are_rejected() -> None:
 def test_non_json_types_are_rejected() -> None:
     with pytest.raises(TypeError, match="not JSON-serializable"):
         jcs_dumps({"v": object()})
+
+
+def test_float_subclasses_normalize_rather_than_leaking_their_repr() -> None:
+    """A float subclass must serialize as a JSON number, not as its repr.
+
+    numpy scalars are the common case: ``repr(np.float64(0.5))`` is
+    ``'np.float64(0.5)'``, which would corrupt a signed canonical form.
+    """
+
+    class Weird(float):
+        def __repr__(self) -> str:
+            return f"Weird({float(self)})"
+
+    assert jcs_dumps({"v": Weird(0.5)}) == '{"v":0.5}'
+
+
+def test_integral_types_that_do_not_subclass_int_are_accepted() -> None:
+    """numpy integers implement __index__ without subclassing int."""
+
+    class Counted:
+        def __index__(self) -> int:
+            return 7
+
+    assert jcs_dumps({"v": Counted()}) == '{"v":7}'
+
+
+def test_float_like_types_are_accepted_via_dunder_float() -> None:
+    from decimal import Decimal
+
+    assert jcs_dumps({"v": Decimal("1.5")}) == '{"v":1.5}'
