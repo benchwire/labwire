@@ -7,7 +7,9 @@ requires-python = ">=3.12"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "packages/bridges/*"]
+# packages/bridges is a grouping directory, not a distribution
+exclude = ["packages/bridges"]
 
 [dependency-groups]
 dev = [

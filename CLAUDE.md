@@ -34,9 +34,14 @@ uv workspace monorepo; one distribution per `packages/*` dir sharing the
 - `packages/mcp` → `labwire-mcp` (M5) — MCP adapter
 - `spec/` (M1), `examples/` (first example lands M2)
 
-**NEVER create `src/labwire/__init__.py` in any package** — it would break the
-PEP 420 namespace shared by all distributions. Only
-`src/labwire/<subpkg>/__init__.py` exists.
+- `packages/bridges/ophyd` → `labwire-ophyd` — exposes ophyd devices as Labwire
+  instruments (ophyd is an **optional** dependency; never vendor or fork it)
+
+**NEVER create `src/labwire/__init__.py` — nor `src/labwire/bridges/__init__.py` —
+in any package**: both are PEP 420 namespace directories shared by several
+distributions. Only the leaf `src/labwire/<subpkg>/__init__.py` exists. The uv
+workspace lists `packages/bridges/*` as members and excludes the
+`packages/bridges` grouping directory itself.
 
 Packages/directories are created at the milestone that fills them — no hollow
 placeholder packages.

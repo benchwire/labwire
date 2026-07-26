@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-ophyd"
+version = "0.2.0.dev0"
+description = "Expose ophyd (Bluesky) devices as Labwire instruments"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+dependencies = ["labwire-core", "pyyaml>=6", "typer>=0.12"]
+
+[project.optional-dependencies]
+# ophyd is optional: the bridge is only usable with it, but labwire-core must
+# never depend on it, and the rest of the workspace must import without it.
+ophyd = ["ophyd>=1.9"]
+
+[project.scripts]
+labwire-ophyd = "labwire.bridges.ophyd.cli:main"
+
+[dependency-groups]
+dev = ["ophyd>=1.9"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]

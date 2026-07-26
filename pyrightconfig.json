@@ -3,13 +3,58 @@
   "pythonVersion": "3.12",
   "venvPath": ".",
   "venv": ".venv",
-  "include": ["packages", "examples", "tests"],
-  "exclude": ["**/__pycache__", ".venv"],
+  "include": [
+    "packages",
+    "examples",
+    "tests"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    ".venv"
+  ],
   "extraPaths": [
     "packages/core/src",
     "packages/sim/src",
     "packages/drivers/src",
     "packages/cli/src",
-    "packages/mcp/src"
+    "packages/mcp/src",
+    "packages/bridges/ophyd/src"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "packages/bridges/ophyd/src",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none"
+    },
+    {
+      "root": "packages/bridges/ophyd/tests",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none",
+      "reportUnknownParameterType": "none",
+      "reportArgumentType": "none",
+      "reportIncompatibleMethodOverride": "none",
+      "reportReturnType": "none",
+      "reportUntypedBaseClass": "none"
+    }
   ]
 }

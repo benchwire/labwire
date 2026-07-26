@@ -22,3 +22,17 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pyright
       - run: uv run pytest --cov --cov-report=term-missing
+
+  core-without-ophyd:
+    # ophyd is an optional dependency of the bridge package: the rest of the
+    # workspace must import and pass without it installed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --package labwire-core --no-dev --group dev
+      - run: uv run --no-sync python -c "import ophyd" && exit 1 || echo "ophyd absent, as intended"
+      - run: uv run --no-sync pytest packages/core/tests -q
