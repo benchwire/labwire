@@ -1,8 +1,8 @@
 # Labwire Protocol Specification
 
-**Version:** 0.1.0 (Draft)
-**Protocol version string:** `"0.1"`
-**Date:** 2026-07-23
+**Version:** 0.2.0 (Draft)
+**Protocol version string:** `"0.2"`
+**Date:** 2026-07-26
 **License:** Apache-2.0
 
 ---
@@ -16,10 +16,10 @@ its measurements, and receive **cryptographically signed** records of what was
 done. The protocol is JSON-RPC 2.0 over WebSocket or stdio, with a capability
 discovery model inspired by the Model Context Protocol (MCP).
 
-This document is a **draft**. Version 0.1 is developed alongside a reference
-implementation built in milestones; §14 states exactly which parts of this
-specification the reference implementation realizes at any given time. Breaking changes are expected before
-1.0.
+This document is a **draft**. It is developed alongside a working reference
+implementation; §14.2 states exactly which parts of this specification that
+implementation realizes. Breaking changes are expected before 1.0 — v0.2
+already makes some (§17).
 
 ## 2. Terminology & Conformance
 
@@ -53,7 +53,7 @@ otherwise stated, unrecognized fields MUST be ignored by both parties
 
 Labwire uses JSON-RPC 2.0 [JSONRPC] messages over a bidirectional transport.
 The client issues **requests**; the server answers with **responses** and
-pushes **notifications** (command progress, telemetry, events). In v0.1 the
+pushes **notifications** (command progress, telemetry, events). In v0.2 the
 server MUST NOT issue requests to the client, with one exception: `ping`
 (§6.3), which either party MAY send and the receiver MUST answer. The only
 client-to-server notification is `notifications/initialized`.
@@ -94,7 +94,7 @@ pushed status until a terminal state → read telemetry → repeat → disconnec
 ## 4. Versioning & Negotiation
 
 The protocol version is a string of the form `"MAJOR.MINOR"`. This document
-specifies protocol version `"0.1"`.
+specifies protocol version `"0.2"`.
 
 - The client states its protocol version in `initialize`.
 - The server replies with the protocol version **it will speak** — the highest
@@ -103,10 +103,10 @@ specifies protocol version `"0.1"`.
   MUST close the connection.
 - Servers SHOULD accept any client version that shares their MAJOR version.
   For MAJOR version 0, the MINOR version carries compatibility significance:
-  servers SHOULD reply with exactly `"0.1"` if they implement this document.
+  servers SHOULD reply with exactly `"0.2"` if they implement this document.
 
 The specification document itself is versioned `MAJOR.MINOR.PATCH`
-(this document: 0.1.0); PATCH revisions never change the wire protocol.
+(this document: 0.2.0); PATCH revisions never change the wire protocol.
 
 ## 5. Transports
 
@@ -118,7 +118,7 @@ transport's job, and exactly one JSON-RPC message occupies one frame.
 
 - Each JSON-RPC message MUST be sent as one WebSocket **text** frame
   containing one JSON object.
-- Binary frames are reserved for future use (bulk data). In v0.1 a receiver
+- Binary frames are reserved for future use (bulk data). In v0.2 a receiver
   MUST ignore binary frames.
 - WebSocket protocol-level ping/pong frames MAY be used for keepalive by
   either party.
@@ -158,7 +158,7 @@ request).
 - `client_info` (object, REQUIRED) — `{name, version}` identifying the client
   software.
 - `capabilities` (object, REQUIRED) — reserved for client capability flags;
-  MAY be empty in v0.1.
+  MAY be empty in v0.2.
 - `api_key` (string, OPTIONAL) — see §13.
 
 `initialize` result:
@@ -168,7 +168,7 @@ request).
 - `server_info` (object, REQUIRED) — `{name, version}` identifying the server
   software.
 - `capabilities` (object, REQUIRED) — server capability flags. Defined in
-  v0.1: `telemetry` (boolean), `events` (boolean), and `manifests` (boolean —
+  v0.2: `telemetry` (boolean), `events` (boolean), and `manifests` (boolean —
   the server produces signed run manifests, §12). Absent flags default to
   `false`. A request for a method belonging to a capability the server
   advertised as `false` MUST be rejected with `-32001` (`unsupported`).
@@ -184,7 +184,7 @@ transport. On close, the server MUST treat all of the session's telemetry
 subscriptions as cancelled. Commands already accepted continue to execute
 (instruments are physical processes); their terminal states are simply no
 longer observable in this session — recoverable via `command/status` in a
-future session only if the server persists run state, which v0.1 does not
+future session only if the server persists run state, which v0.2 does not
 require.
 
 ### 6.3 Liveness
@@ -244,10 +244,23 @@ Each entry in `commands`:
   describing the command's `params`. Note that the empty schema `{}`
   constrains nothing; commands that take no parameters SHOULD declare
   `{"type": "object", "additionalProperties": false}`.
-- `unit_annotations` (object, OPTIONAL) — maps parameter name → unit string.
-  Units SHOULD be UCUM case-sensitive codes (e.g. `"mL/min"`, `"Cel"`,
-  `"g"`, `"V"`). In v0.1, unit strings are opaque to the protocol: they are
-  documentation for the agent, not validated wire syntax.
+- `unit_annotations` (object, REQUIRED) — maps parameter name → **UCUM
+  case-sensitive unit code** (e.g. `"mL/min"`, `"Cel"`, `"g"`, `"V"`).
+  **Every numeric parameter** (JSON Schema type `number` or `integer`) in
+  `params_schema` MUST have an entry; dimensionless quantities MUST use
+  `"1"` (UCUM unity). Commands with no numeric parameters declare `{}`.
+  Non-numeric parameters MAY be annotated but are not required to be.
+  Servers MUST reject their own malformed declarations at startup rather
+  than serve an under-annotated descriptor; clients MAY reject a descriptor
+  that violates this rule.
+- `returns_units` (object, REQUIRED) — the same mapping for the command's
+  result: every numeric property named in `returns_schema` MUST have a UCUM
+  code. `{}` when the command returns nothing numeric.
+- `qudt_quantity_kind` (object, OPTIONAL) — maps the same parameter or
+  result names to a QUDT `quantityKind` IRI or local name (e.g.
+  `"VolumeFlowRate"`), for consumers doing dimensional reasoning.
+- `safety_class` (string, OPTIONAL, default `"S1"`) — one of `"S0"`,
+  `"S1"`, `"S2"`, `"S3"`; see §8.6.
 - `returns_schema` (object, OPTIONAL) — JSON Schema for the command's
   `result` value.
 - `estimated_duration_s` (number, OPTIONAL) — typical wall-clock duration.
@@ -258,6 +271,19 @@ Each entry in `commands`:
 - `clears_interlocks` (array of strings, OPTIONAL) — declared interlock
   names this command can clear. See §8.5: such a command remains submittable
   while a named interlock is tripped.
+
+**Why units are mandatory.** An agent that cannot tell microlitres from
+millilitres cannot be trusted with a syringe. Making the unit code a
+declaration requirement rather than a documentation convention means an
+agent — or a schema validator — can refuse an ambiguous instrument instead
+of guessing. Labwire v0.1 treated units as optional prose; v0.2 does not.
+This follows LAP's mandatory-UCUM design ([PRIOR_ART.md](../PRIOR_ART.md)).
+
+Unit codes are validated for **presence**, not grammar: v0.2 servers MUST
+require a non-empty string but are not required to parse UCUM syntax. Full
+UCUM grammar validation is a roadmap item.
+<!-- TODO-VERIFY: adopt a UCUM validation library, or vendor the grammar,
+before declaring conformance to UCUM itself rather than to its code set. -->
 
 Command results MUST be JSON-serializable values. This is what allows a
 Labwire command to be exposed as a tool by agent frameworks with at most a
@@ -274,12 +300,14 @@ Each entry in `channels`:
 - `description` (string, REQUIRED).
 - `dtype` (string, REQUIRED) — one of `"float64"`, `"int64"`, `"bool"`,
   `"string"`. Values of `int64` channels MUST fit the IEEE-754
-  exactly-representable integer range (|v| ≤ 2^53 − 1) in v0.1. Non-finite
+  exactly-representable integer range (|v| ≤ 2^53 − 1). Non-finite
   `float64` values (NaN, ±Infinity) MUST NOT be sent as samples; servers
   MUST either suppress such samples or report the condition as an event.
-- `unit` (string, REQUIRED) — unit of the channel's values; SHOULD be UCUM
-  (opaque in v0.1, as above). Use `"1"` (UCUM unity) for dimensionless
-  channels.
+- `unit` (string, REQUIRED) — the channel's **UCUM case-sensitive unit
+  code**, a non-empty string. Use `"1"` (UCUM unity) for dimensionless
+  channels. Presence is normative; grammar validation is not (§7.2).
+- `qudt_quantity_kind` (string, OPTIONAL) — QUDT `quantityKind` for this
+  channel.
 - `sample_rate_hz_hint` (number, OPTIONAL) — the natural production rate.
 
 ### 7.4 Interlock declaration
@@ -341,14 +369,17 @@ Legal transitions: `accepted → running | canceling | failed`;
 
 `command/submit` params: `command` (string, REQUIRED — a declared command
 name), `params` (object, REQUIRED — validated against the command's
-`params_schema`; MAY be `{}`).
+`params_schema`; MAY be `{}`), `confirmation` (string, OPTIONAL — required
+for `S2`/`S3` commands, see §8.6).
 
 An undeclared `command` name MUST be rejected with `-32001` (`unsupported`).
 If `params` violate the command's `params_schema`, the server MUST reject
-the request with `-32000` (`validation`). In both cases the server MUST NOT
-create a run. Otherwise the server assigns a `command_id` (string, unique
-per instrument, RECOMMENDED: UUIDv4) and responds
-`{command_id, status: "accepted"}`.
+the request with `-32000` (`validation`). If the command's `safety_class` is
+`S2` or `S3` and no acceptable `confirmation` is supplied, the server MUST
+reject it with `-32009` (`confirmation_required`) (§8.6). In all these cases
+the server MUST NOT create a run. Otherwise the server assigns a
+`command_id` (string, unique per instrument, RECOMMENDED: UUIDv4) and
+responds `{command_id, status: "accepted"}`.
 
 **Status is push-first.** On every state transition out of `accepted`, the
 server MUST send `notifications/command_status` to the submitting session
@@ -420,6 +451,46 @@ The server MUST emit `interlock/tripped` and `interlock/cleared` events
 its `description` (e.g. a hard interlock clears only at the instrument;
 a soft interlock clears via a declared command).
 
+### 8.6 Safety classes and confirmation
+
+Every command carries a `safety_class` (§7.2). The taxonomy is adopted from
+LAP ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755); see
+[PRIOR_ART.md](../PRIOR_ART.md)) so that instruments and agents crossing
+between the two protocols classify actions the same way:
+
+| Class | Meaning | Confirmation |
+|---|---|---|
+| `S0` | Emergency or protective operations (stop, vent, clear). Always permitted. | never required |
+| `S1` | Routine and reversible (read a value, set a setpoint). **Default.** | not required |
+| `S2` | Costly or irreversible (consumes reagent, destroys a sample). | REQUIRED |
+| `S3` | Hazardous — capable of harming people or equipment. | REQUIRED |
+
+Normative rules:
+
+- Servers MUST reject a `command/submit` for an `S2` or `S3` command that
+  carries no `confirmation` value, with error `-32009`
+  (`confirmation_required`), `retryable: false`, and
+  `data.details.safety_class` set to the command's class. Retrying the
+  identical request cannot succeed; the client must obtain confirmation.
+- A server MUST NOT require confirmation for `S0`, and SHOULD NOT for `S1`.
+- Servers MUST NOT downgrade a command's declared class at submission time.
+- `S0` commands MUST remain submittable while an interlock is tripped
+  (§8.5), since they are the means of recovery. (A command that clears an
+  interlock therefore normally declares `S0` and lists it in
+  `clears_interlocks`.)
+- What counts as an acceptable `confirmation` is deployment policy in v0.2.
+  A conforming server MAY accept any non-empty string, MAY compare against a
+  configured token, or MAY implement a stronger scheme.
+
+**Honest limitation.** v0.2 specifies *where* confirmation is enforced, not
+*who* confirmed. A shared token proves an operator configured the deployment
+to permit this class of action; it does not cryptographically bind a named
+operator to a specific task. LAP's design — a JWS operator token bound to
+the exact task and the hash of its canonical parameters — is the more
+complete answer, and adopting an equivalent is a tracked roadmap item
+(§13, [ROADMAP.md](../ROADMAP.md)). Deployments where that distinction
+matters should not treat v0.2 confirmation as an audit control.
+
 ## 9. Streaming Telemetry
 
 ### 9.1 Subscribe / unsubscribe
@@ -477,7 +548,7 @@ server pushes `notifications/event`:
 - `severity` (string, REQUIRED) — `"info"`, `"warning"`, or `"alarm"`.
 - `data` (object, REQUIRED) — event-specific payload; MAY be `{}`.
 
-Reserved event names in v0.1 (servers MUST use these names for these
+Reserved event names in v0.2 (servers MUST use these names for these
 meanings):
 
 | Name | Meaning | `data` |
@@ -491,7 +562,7 @@ meanings):
 Other event names are instrument-defined; vendor extensions MUST use the
 `x-<vendor>/` prefix (§7.5). Servers whose `events` capability is `true`
 MUST deliver every event to every operational session; there is no event
-subscription in v0.1. Events MUST be delivered to a session in emission
+subscription in v0.2. Events MUST be delivered to a session in emission
 order; delivery is best-effort, but events of severity `alarm` SHOULD NOT
 be dropped.
 
@@ -517,6 +588,7 @@ Labwire domain errors use the JSON-RPC server-error range:
 | -32006 | `canceled` | The run was canceled | no |
 | -32007 | `not_cancelable` | Cancel requested for a run that cannot be canceled | no |
 | -32008 | `internal` | Unexpected server error | no |
+| -32009 | `confirmation_required` | An `S2`/`S3` command was submitted without an acceptable `confirmation` (§8.6) | no |
 
 The "Retryable" column is the REQUIRED default for the `retryable` field;
 servers MAY override it per error instance (e.g. a transient
@@ -525,7 +597,9 @@ servers MAY override it per error instance (e.g. a transient
 When multiple rejection rules apply to one request, precedence is:
 not-initialized (`-32002`) → method not found (`-32601`) → invalid method
 params (`-32602`) → `unsupported` (`-32001`) → `validation` (`-32000`) →
-`interlock` (`-32003`) → capacity `busy` (`-32002`).
+`confirmation_required` (`-32009`) → `interlock` (`-32003`) → capacity
+`busy` (`-32002`). Validation precedes confirmation so that an agent is
+never asked to confirm a request that could never run.
 
 ### 11.2 Error object
 
@@ -534,7 +608,7 @@ Everywhere an error appears — JSON-RPC `error` member, or CommandStatus
 
 - `code` (integer, REQUIRED)
 - `message` (string, REQUIRED) — human-readable, one line.
-- `data` (object, REQUIRED for codes -32000..-32008):
+- `data` (object, REQUIRED for codes -32000..-32009):
   - `category` (string, REQUIRED) — from the table above.
   - `retryable` (boolean, REQUIRED) — whether the same request MAY succeed if
     retried without operator intervention. Agents SHOULD key retry policy off
@@ -554,22 +628,21 @@ attributable and tamper-evident.
 
 Servers advertising the `manifests` capability (§6.1) MUST produce a
 manifest for every terminal run. **How manifests are surfaced to consumers
-is implementation-defined in v0.1** — no protocol method carries manifests;
+is implementation-defined in v0.2** — no protocol method carries manifests;
 the reference implementation writes a bundle (manifest + record stream) per
 run to a local directory. A future protocol version may add a retrieval
 method.
 
-> **Conformance note:** manifest *format* is normative in v0.1; the
-> reference implementation produces and verifies manifests starting at its
-> M4 milestone (§14).
+> **Conformance note:** the manifest format is normative; the reference
+> implementation produces and verifies these bundles (§14.2).
 
 ### 12.1 Manifest document
 
 ```json
 <!-- example: manifest/document -->
 {
-  "manifest_version": "0.1",
-  "protocol_version": "0.1",
+  "manifest_version": "0.2",
+  "protocol_version": "0.2",
   "run_id": "b7e0a1c2-4d5e-4f60-8a9b-0c1d2e3f4a5b",
   "instrument": {
     "manufacturer": "Labwire Project",
@@ -580,7 +653,8 @@ method.
   },
   "command": {
     "name": "measure",
-    "params": { "settle_timeout_s": 30.0 }
+    "params": { "settle_timeout_s": 30.0 },
+    "safety_class": "S1"
   },
   "status": "succeeded",
   "result": { "mass_g": 12.3456 },
@@ -607,20 +681,22 @@ method.
 
 All fields are REQUIRED unless marked otherwise:
 
-- `manifest_version` (string) — `"0.1"` for this document.
+- `manifest_version` (string) — `"0.2"` for this document.
 - `protocol_version` (string) — the negotiated protocol version (§4).
 - `run_id` (string) — the run's `command_id`.
 - `instrument` (object) — the `identity` object from the descriptor (§7.1),
   verbatim.
-- `command` (object) — `name` (string) and `params` (object): the submitted
-  command, verbatim.
+- `command` (object) — `name` (string), `params` (object): the submitted
+  command verbatim, and `safety_class` (string): the class the server
+  enforced for it (§8.6). All three are covered by the signature, so a
+  manifest records what safety posture applied to the run.
 - `status` (string) — the run's terminal state (§8.1).
 - `result` (any, present iff `status` is `succeeded` and the command
   returned a value) — the command's result, verbatim.
 - `error` (object, present iff `status` is `failed`) — the Error object
   (§11.2).
 - `data` (object):
-  - `digest_alg` (string) — `"sha256"`, the only permitted v0.1 value.
+  - `digest_alg` (string) — `"sha256"`, the only permitted v0.2 value.
   - `digest` (string) — lowercase hex SHA-256 of the run's **record
     stream**, defined below.
   - `channels` (array of strings) — every channel that produced samples
@@ -628,7 +704,7 @@ All fields are REQUIRED unless marked otherwise:
 - `timestamps` (object) — `submitted`, `started`, `completed`: RFC 3339 UTC
   (§9.2), from the server's clock.
 - `signer` (object):
-  - `alg` (string) — `"ed25519"`, the only permitted v0.1 value.
+  - `alg` (string) — `"ed25519"`, the only permitted v0.2 value.
   - `public_key` (string) — the 32-byte ed25519 public key, standard base64.
   - `key_id` (string) — `"sha256:"` + lowercase hex SHA-256 of the raw
     32-byte public key.
@@ -668,22 +744,33 @@ MUST reject a bundle whose `key_id` does not match its `public_key`.
 
 ### 12.3 Keys
 
-How a verifier comes to trust a public key is out of scope for v0.1. Servers
+How a verifier comes to trust a public key is out of scope for v0.2. Servers
 SHOULD generate a keypair on first run and persist it; operators SHOULD
 record the `key_id` out of band (trust-on-first-use). This is stated plainly:
-v0.1 manifests prove *integrity* (the record wasn't altered) and *key
+v0.2 manifests prove *integrity* (the record wasn't altered) and *key
 continuity* (same signer as before), not *identity* (who the signer is). See
 §13.
 
 ## 13. Security Considerations
 
-v0.1 is designed for **trusted environments**: localhost or an isolated lab
+v0.2 is designed for **trusted environments**: localhost or an isolated lab
 network. Stated plainly:
 
 - **Authentication is a stub.** The client MAY present `api_key` in
   `initialize` (§6.1); a server configured with a key MUST reject
   initialization on mismatch with error `-32000` (`validation`). There is no
-  authorization model, no user identity, and no key rotation in v0.1.
+  authorization model, no user identity, and no key rotation in v0.2.
+- **Safety confirmation proves policy, not identity.** The `confirmation`
+  value that gates `S2`/`S3` commands (§8.6) shows that whoever holds the
+  deployment's token permitted this class of action. It does **not** identify
+  an operator, bind them to a specific task, or produce an audit trail.
+  Cryptographic operator binding — an operator token signed over the task and
+  the hash of its canonical parameters, as LAP specifies
+  ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)) — is the intended
+  successor and is tracked in [ROADMAP.md](../ROADMAP.md). Until then,
+  deployments MUST NOT rely on `confirmation` as an accountability control.
+  <!-- TODO-VERIFY: settle on JWS profile + key distribution before
+  implementing operator binding. -->
 - **Transport security.** Deployments that cross any network boundary SHOULD
   use `wss://` (TLS). The protocol itself provides no confidentiality.
 - **Manifest guarantees** are limited to integrity and key continuity
@@ -714,22 +801,25 @@ A server MUST document its level. A client MUST tolerate a server of any
 level (the capability flags in the `initialize` *result* tell it what to
 expect).
 
-### 14.2 Reference implementation status (v0.1)
+### 14.2 Reference implementation status (v0.2)
 
 Honesty table — what the reference implementation in this repository
-implements, by its milestone plan:
+implements:
 
 | Spec section | Status |
 |---|---|
-| §5.1 WebSocket transport | Implemented (M2) |
+| §5.1 WebSocket transport | Implemented |
 | §5.2 stdio transport | **Specified only** — no consumer yet; implementation unscheduled |
-| §6 session lifecycle, §7 discovery, §8 commands, §9 telemetry, §10 events, §11 errors | Implemented (M2) |
-| §12 signed manifests | Implemented (M4): bundle = `manifest.json` + `records.jsonl`, verified by `labwire verify` |
-| §13 `api_key` stub | **Deferred — unscheduled** (no milestone in M2–M7 covers it) |
-| In-memory transport (test-only; not a §5 transport) | Implemented (M2) |
+| §6 session lifecycle, §7 discovery, §8 commands, §9 telemetry, §10 events, §11 errors | Implemented |
+| §7.2/§7.3 mandatory UCUM codes | Implemented — presence enforced at declaration and on the wire; UCUM **grammar** not parsed |
+| §7.2 `qudt_quantity_kind` | Implemented as a pass-through declaration; no QUDT reasoning |
+| §8.6 safety classes | Implemented — `S2`/`S3` confirmation enforced with a configured-token stub |
+| §8.6 operator-bound confirmation | **Not implemented** — see §13 and ROADMAP.md |
+| §12 signed manifests | Implemented: bundle = `manifest.json` + `records.jsonl`, verified by `labwire verify` |
+| §13 `api_key` stub | **Deferred — unscheduled** |
+| In-memory transport (test-only; not a §5 transport) | Implemented |
 
-This table is updated at each milestone commit; "Lands at" becomes
-"Implemented" only when the milestone ships.
+This table is updated with each release.
 
 ## 15. JSON Message Reference
 
@@ -739,12 +829,11 @@ Marker grammar: the first line *inside* each fenced JSON block is
 `<!-- example: <name>/<kind> -->`, where `<name>` is a JSON-RPC method name
 or one of the literals `error` and `manifest`, and `<kind>` is one of
 `request`, `result`, `notification`, `notification-terminal`, `response`,
-`document`, `signature-excerpt`. From milestone M2 onward, the reference
-implementation's test suite extracts every marked block in this document
-(including §12.1), strips the marker line, and round-trips the JSON through
-the message model registered for `<name>` — failing if any example does not
-round-trip. Manifest examples validate from M4; blocks whose kind is
-`signature-excerpt` are validated only for the fields present.
+`document`, `signature-excerpt`. The reference implementation's test suite
+extracts every marked block in this document (including §12.1), strips the
+marker line, and round-trips the JSON through the message model registered
+for `<name>` — failing if any example does not round-trip. Blocks whose kind
+is `signature-excerpt` are validated only for the fields present.
 
 Examples are independent snapshots, not one session timeline; `id`,
 `command_id`, and hash/signature values are illustrative unless stated
@@ -759,7 +848,7 @@ otherwise.
   "id": 1,
   "method": "initialize",
   "params": {
-    "protocol_version": "0.1",
+    "protocol_version": "0.2",
     "client_info": { "name": "labwire-client", "version": "0.1.0" },
     "capabilities": {}
   }
@@ -772,7 +861,7 @@ otherwise.
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "protocol_version": "0.1",
+    "protocol_version": "0.2",
     "server_info": { "name": "labwire-sim-pump", "version": "0.1.0" },
     "capabilities": { "telemetry": true, "events": true }
   }
@@ -836,6 +925,12 @@ otherwise.
           "required": ["volume_ul", "rate_ul_min"]
         },
         "unit_annotations": { "volume_ul": "uL", "rate_ul_min": "uL/min" },
+        "returns_units": { "dispensed_ul": "uL" },
+        "qudt_quantity_kind": {
+          "volume_ul": "Volume",
+          "rate_ul_min": "VolumeFlowRate"
+        },
+        "safety_class": "S2",
         "returns_schema": {
           "type": "object",
           "properties": { "dispensed_ul": { "type": "number" } },
@@ -843,6 +938,17 @@ otherwise.
         },
         "estimated_duration_s": 30.0,
         "interruptible": true
+      },
+      {
+        "name": "abort",
+        "title": "Abort motion",
+        "description": "Stop the motor immediately and clear a stalled line.",
+        "params_schema": { "type": "object", "additionalProperties": false },
+        "unit_annotations": {},
+        "returns_units": {},
+        "safety_class": "S0",
+        "interruptible": false,
+        "clears_interlocks": ["over_pressure"]
       }
     ],
     "channels": [
@@ -851,6 +957,7 @@ otherwise.
         "description": "Instantaneous flow rate.",
         "dtype": "float64",
         "unit": "uL/min",
+        "qudt_quantity_kind": "VolumeFlowRate",
         "sample_rate_hz_hint": 10.0
       }
     ],
@@ -877,10 +984,15 @@ otherwise.
   "method": "command/submit",
   "params": {
     "command": "dispense",
-    "params": { "volume_ul": 500.0, "rate_ul_min": 1000.0 }
+    "params": { "volume_ul": 500.0, "rate_ul_min": 1000.0 },
+    "confirmation": "operator-standing-grant-2026-07-26"
   }
 }
 ```
+
+`dispense` is declared `S2` (§8.6), so the `confirmation` field is
+required; submitting the same request without it is rejected with `-32009`
+(`confirmation_required`). An `S0` or `S1` command needs no such field.
 
 ```json
 <!-- example: command/submit/result -->
@@ -1065,7 +1177,7 @@ The manifest document example appears in §12.1. The signed bundle adds the
 ```json
 <!-- example: manifest/signature-excerpt -->
 {
-  "manifest_version": "0.1",
+  "manifest_version": "0.2",
   "signature": "hcuNZWFGkEHDDTM1XZAs2Cj1YtqBhIWU93MOWkiPYbnhr1DAOFTZaKKCyBsnrLTogVCLYzp9nsdgnG5xqRDZBQ"
 }
 ```
@@ -1089,13 +1201,27 @@ Labwire borrows deliberately from prior art, with gratitude:
   manifest.
 - **OPC-UA LADS:** vocabulary for lab-device state machines and interlocks.
   <!-- TODO-VERIFY: confirm LADS's device state-machine/interlock
-  vocabulary during the M7 prior-art review -->
+  vocabulary against the published companion specification -->
+- **LAP** ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)): the
+  mandatory-UCUM discipline for every quantity (§7.2, §7.3) and the S0–S3
+  safety-class taxonomy with confirmation for costly and hazardous actions
+  (§8.6). Labwire and LAP are independent, convergent designs; these two
+  ideas are adopted from LAP with thanks.
 
-A detailed comparison will land in `PRIOR_ART.md` (repository root,
-milestone M7).
+A detailed, honest comparison — including what these systems do better than
+Labwire — lives in `PRIOR_ART.md` at the repository root.
 
 ## 17. Changelog
 
+- **0.2.0 (2026-07-26):** Protocol version `"0.2"`. **Breaking:**
+  `unit_annotations` and `returns_units` are now REQUIRED on every command
+  and MUST carry a UCUM code for every numeric parameter and numeric result
+  field (dimensionless = `"1"`); `ChannelSpec.unit` MUST be a UCUM code.
+  **Added:** per-command `safety_class` (`S0`–`S3`, default `S1`, §8.6) with
+  mandatory `confirmation` on `S2`/`S3` submissions and the new error
+  `-32009` (`confirmation_required`); optional `qudt_quantity_kind`
+  declarations; `command.safety_class` inside signed manifests (§12.1).
+  Units and the safety taxonomy are adopted from LAP with credit (§16).
 - **0.1.0 (2026-07-23):** Initial draft. Protocol version `"0.1"`.
 
 ---
