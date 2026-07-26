@@ -33,6 +33,15 @@ jobs:
         with:
           enable-cache: true
           python-version: "3.12"
-      - run: uv sync --package labwire-core --no-dev --group dev
-      - run: uv run --no-sync python -c "import ophyd" && exit 1 || echo "ophyd absent, as intended"
-      - run: uv run --no-sync pytest packages/core/tests -q
+      - run: uv sync --all-packages
+      - name: Remove the optional ophyd dependency
+        run: uv pip uninstall ophyd
+      - name: Confirm ophyd really is absent
+        run: |
+          if uv run --no-sync python -c "import ophyd" 2>/dev/null; then
+            echo "ophyd is still installed; this job proves nothing" >&2
+            exit 1
+          fi
+          echo "ophyd absent, as intended"
+      - name: labwire-core must still pass
+        run: uv run --no-sync pytest packages/core/tests -q
