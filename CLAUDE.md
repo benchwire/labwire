@@ -62,6 +62,22 @@ Work M0→M7 strictly in order. Per milestone: **one conventional commit**
 2. Summarize what exists; **list known gaps honestly**
 3. Push; confirm GitHub Actions green before moving on
 
+## Protocol v0.2 rules (enforced in code)
+
+- Every numeric command parameter needs a UCUM code in `units=`, every named
+  numeric result field one in `returns_units=` (`"1"` for dimensionless);
+  channels need a non-empty UCUM `unit`. Violations raise `TypeError` at
+  declaration time — that is deliberate, do not weaken it.
+- Every command has a `safety_class` (S0–S3, default S1). Costly or
+  irreversible actions are S2, hazardous ones S3; both require a
+  `confirmation` on submit. Recovery paths (clearing an interlock, e-stop)
+  are S0 so they stay submittable while interlocked.
+- The UCUM discipline and the S0–S3 taxonomy come from LAP
+  (arXiv:2606.03755) and MUST keep their credit in SPEC §16 and PRIOR_ART.md.
+- Comparisons to other protocols stay factual and never disparaging; LAP in
+  particular gets treated with respect. Never claim LAP compatibility or
+  endorsement.
+
 ## Quality gates
 
 - TDD where practical: failing test → minimal implementation → green → next

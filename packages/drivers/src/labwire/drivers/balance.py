@@ -39,7 +39,7 @@ class Balance(Instrument):
         manufacturer="Labwire Project",
         model="SimBalance-120",
         serial_number="unconfigured",
-        firmware_version="0.1.0",
+        firmware_version="0.2.0",
     )
 
     mass = channel(

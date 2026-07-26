@@ -8,8 +8,8 @@ lab equipment": one universal way for AI agents to **discover** an
 instrument's capabilities, **command** it, **stream** its measurements, and
 walk away with **cryptographically signed** proof of what was done.
 
-> Working title, v0.1 draft. The wire protocol will change before 1.0.
-> Feedback and prior-art corrections are very welcome — see
+> Working title, protocol v0.2 draft. The wire protocol will change before
+> 1.0. Feedback and prior-art corrections are very welcome — see
 > [CONTRIBUTING.md](CONTRIBUTING.md).
 
 <!-- demo GIF goes here once recorded: see docs/demo-gif.md -->
@@ -27,9 +27,10 @@ buildable now:
 - **Signed results.** Every run can produce an ed25519-signed manifest over
   the exact telemetry recorded — portable, tamper-evident evidence of what
   instrument did what, verified by one CLI command.
-- **Safety in the protocol.** Interlocks, cancellation, typed errors with
-  retryability — the things an autonomous agent must handle — are first-class
-  and specified, not vendor add-ons.
+- **Safety and physical typing in the protocol.** Mandatory UCUM units on
+  every quantity, S0–S3 safety classes with confirmation required for
+  irreversible or hazardous actions, interlocks, cancellation, and typed
+  errors with retryability — first-class and specified, not vendor add-ons.
 - **Runnable by a stranger in 5 minutes.** Zero hardware: the reference
   implementation ships three realistic simulated instruments.
 
@@ -106,7 +107,7 @@ in CI.
 | [labwire-drivers](packages/drivers) | Drivers wrapping those native protocols as Labwire instruments |
 | [labwire-mcp](packages/mcp) | MCP adapter: every instrument command becomes an MCP tool |
 | [labwire-cli](packages/cli) | `labwire verify <bundle>` — authenticate signed run evidence |
-| [spec/](spec) | The protocol specification (v0.1 draft) |
+| [spec/](spec) | The protocol specification (v0.2 draft) |
 | [examples/](examples) | Quickstart, streaming/recovery, and the closed-loop demo |
 
 Wrapping your own device is a class and a decorator:
@@ -115,9 +116,13 @@ Wrapping your own device is a class and a decorator:
 class MyPump(Instrument):
     identity = IdentityInfo(manufacturer="You", model="Pump-1",
                             serial_number="001", firmware_version="1.0")
-    flow = channel("flow_rate", unit="uL/min")
+    flow = channel("flow_rate", unit="uL/min")   # UCUM codes are mandatory
 
-    @command(units={"volume_ul": "uL", "rate_ul_min": "uL/min"})
+    @command(
+        units={"volume_ul": "uL", "rate_ul_min": "uL/min"},
+        returns_units={"dispensed_ul": "uL"},
+        safety_class="S2",                       # irreversible: needs confirmation
+    )
     async def dispense(self, ctx: CommandContext,
                        volume_ul: float, rate_ul_min: float) -> dict[str, float]:
         """Dispense a volume at a controlled flow rate."""
@@ -149,8 +154,11 @@ The three instruments are **original simulated device models** — realistic
 latency, noise, drift, failure modes, and safety interlocks — but they are
 not emulations of any real vendor's hardware, and **no compatibility with
 real instruments is claimed**. In the closed-loop demo, the chemistry between
-devices is computed by the demo harness. v0.1 non-goals: fleet control,
-web UI, auth beyond a stub API key, real hardware drivers, cloud hosting.
+devices is computed by the demo harness. Safety confirmation for S2/S3
+commands proves deployment policy, not operator identity — cryptographic
+operator binding is on the [roadmap](ROADMAP.md), not in v0.2. Non-goals for
+now: fleet control, web UI, auth beyond a stub API key, real hardware
+drivers, cloud hosting.
 
 ## Prior art & positioning
 
@@ -174,8 +182,8 @@ PyLabRobot, and what each does better than Labwire.
 make check   # ruff + pyright strict + full test suite (exactly what CI runs)
 ```
 
-Status: all seven bootstrap milestones (M0–M7) are complete. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for the process and quality gates.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the process and quality gates,
+and [ROADMAP.md](ROADMAP.md) for what is planned but not built.
 
 ## License
 

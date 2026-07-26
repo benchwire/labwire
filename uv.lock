@@ -490,7 +490,7 @@ wheels = [
 
 [[package]]
 name = "labwire-cli"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "labwire-core" },
@@ -505,7 +505,7 @@ requires-dist = [
 
 [[package]]
 name = "labwire-core"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "pydantic" },
@@ -522,7 +522,7 @@ requires-dist = [
 
 [[package]]
 name = "labwire-drivers"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 source = { editable = "packages/drivers" }
 dependencies = [
     { name = "labwire-core" },
@@ -541,7 +541,7 @@ dev = [{ name = "labwire-sim", editable = "packages/sim" }]
 
 [[package]]
 name = "labwire-mcp"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "labwire-core" },
@@ -568,7 +568,7 @@ dev = [
 
 [[package]]
 name = "labwire-sim"
-version = "0.1.0.dev0"
+version = "0.2.0.dev0"
 source = { editable = "packages/sim" }
 dependencies = [
     { name = "labwire-core" },

@@ -37,7 +37,7 @@ class SyringePump(Instrument):
         manufacturer="Labwire Project",
         model="SimPump-200",
         serial_number="unconfigured",
-        firmware_version="0.1.0",
+        firmware_version="0.2.0",
     )
 
     flow_rate = channel(

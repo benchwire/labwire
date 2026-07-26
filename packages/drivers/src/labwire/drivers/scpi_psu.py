@@ -40,7 +40,7 @@ class PowerSupply(Instrument):
         manufacturer="Labwire Project",
         model="SimPSU-3005",
         serial_number="unconfigured",
-        firmware_version="0.1.0",
+        firmware_version="0.2.0",
     )
 
     voltage = channel(
