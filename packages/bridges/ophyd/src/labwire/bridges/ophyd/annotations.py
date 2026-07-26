@@ -92,7 +92,14 @@ class ComponentAnnotation(_Strict):
     """Override ophyd's value-inferred dtype."""
     limits: Limits | None = None
     safety_class: SafetyClass | None = None
-    """Overrides the class of this component's generated ``set_*`` command."""
+    """Overrides the class of this component's generated actuation command."""
+    settable: bool | None = None
+    """Force a component read-only (``false``) even though ophyd allows a put.
+
+    Many readbacks are technically writable — a detector's computed value, a
+    readback mirror — but writing to them is meaningless or harmful. Setting
+    this to ``false`` keeps the channel and drops its actuation command.
+    """
     exclude: bool = False
     """Drop this component deliberately (not counted as an unresolved gap)."""
 
@@ -108,6 +115,8 @@ class CommandAnnotation(_Strict):
     safety_class: SafetyClass | None = None
     description: str | None = None
     estimated_duration_s: float | None = None
+    exclude: bool = False
+    """Drop a generated command that is meaningless for this device."""
 
 
 class DeviceAnnotation(_Strict):
@@ -377,6 +386,7 @@ def resolve(
 
         assert unit is not None
         assert dtype is not None
+        settable = component.settable if merged.settable is None else merged.settable
         components.append(
             ResolvedComponent(
                 key=component.key,
@@ -389,7 +399,7 @@ def resolve(
                 limits=_intersect(
                     component.limits, merged.limits.as_tuple() if merged.limits else None
                 ),
-                settable=component.settable,
+                settable=settable,
                 source=component.source,
             )
         )
@@ -398,14 +408,25 @@ def resolve(
         raise AnnotationError(problems)
 
     exposed_keys = {c.key for c in components}
+    unsettable = {c.key for c in components if not c.settable}
     commands: list[ResolvedCommand] = []
     for command in draft.commands:
         if command.component_key is not None and command.component_key not in exposed_keys:
             continue  # its component was excluded or omitted
+        if (
+            command.name.startswith("set_")
+            and command.component_key is not None
+            and command.component_key in unsettable
+        ):
+            # A per-signal setter writes its component; a positioner's move is
+            # only *keyed* to the readback for its unit, so it is unaffected.
+            continue
         layers = [
             layer.commands[command.name] for layer in all_layers if command.name in layer.commands
         ]
         merged_command = _merge_command(layers)
+        if merged_command.exclude:
+            continue
         # A component-level safety_class applies to that component's set command.
         component_class: SafetyClass | None = None
         if command.component_key is not None:

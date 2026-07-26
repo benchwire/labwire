@@ -430,3 +430,44 @@ def test_dtype_can_be_overridden_because_ophyd_infers_it_from_a_value() -> None:
     devices["ophyd.sim.SynAxis"]["components"]["readback"]["dtype"] = "float64"  # pyright: ignore[reportIndexIssue]
     resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(raw))
     assert resolved.component("ax").dtype == "float64"
+
+
+def test_a_component_can_be_marked_read_only() -> None:
+    """A detector's computed value is writable in ophyd but must not be a command."""
+
+    class Bank(Device):
+        knob = Cpt(Signal, value=0.0, kind=Kind.hinted)
+
+    annotations = AnnotationFile.model_validate(
+        {
+            "version": 1,
+            "devices": {
+                f"{MODULE}.{Bank.__qualname__}": {
+                    "components": {"knob": {"unit": "1", "settable": False}}
+                }
+            },
+        }
+    )
+    resolved = resolve(introspect(Bank(name="bank")), annotations)
+    assert "set_knob" not in {c.name for c in resolved.commands}
+    assert resolved.component("bank_knob").settable is False  # still a channel
+
+
+def test_a_positioner_move_survives_a_read_only_readback() -> None:
+    """move is keyed to the readback only for its unit; it writes the device."""
+    raw = _axis_units()
+    devices = raw["devices"]
+    assert isinstance(devices, dict)
+    devices["ophyd.sim.SynAxis"]["components"]["readback"]["settable"] = False  # pyright: ignore[reportIndexIssue]
+    resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(raw))
+    assert "move" in {c.name for c in resolved.commands}
+
+
+def test_a_meaningless_generated_command_can_be_excluded() -> None:
+    raw = _axis_units()
+    devices = raw["devices"]
+    assert isinstance(devices, dict)
+    devices["ophyd.sim.SynAxis"]["commands"] = {"trigger": {"exclude": True}}  # pyright: ignore[reportIndexIssue]
+    resolved = resolve(introspect(SynAxis(name="ax")), AnnotationFile.model_validate(raw))
+    assert "trigger" not in {c.name for c in resolved.commands}
+    assert "move" in {c.name for c in resolved.commands}

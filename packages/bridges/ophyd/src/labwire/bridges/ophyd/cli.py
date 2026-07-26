@@ -64,6 +64,11 @@ def _starter_document(draft: DraftInstrument) -> dict[str, Any]:
     for component in draft.components:
         entry: dict[str, Any] = {}
         entry["unit"] = component.unit if component.unit else TODO_UNIT
+        if component.dtype is not None:
+            # Written out because ophyd infers dtype from the value a signal
+            # happens to hold: an axis resting at 0 reports "integer", which
+            # would reject a fractional move until this is corrected.
+            entry["dtype"] = component.dtype
         if component.egu and not component.unit:
             entry["description"] = f"TODO: device reports EGU {component.egu!r}"
         if component.limits is not None:

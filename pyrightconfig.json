@@ -55,6 +55,23 @@
       "reportIncompatibleMethodOverride": "none",
       "reportReturnType": "none",
       "reportUntypedBaseClass": "none"
+    },
+    {
+      "root": "examples/ophyd_scan",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "examples/ophyd_scan"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none",
+      "reportArgumentType": "none"
     }
   ]
 }

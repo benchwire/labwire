@@ -1,0 +1,84 @@
+# Labwire annotation file for the ophyd scan demo.
+#
+# ophyd knows this rig's structure but nothing about its units or its risks:
+# ophyd.sim devices report no units at all, and ophyd has no concept of a
+# safety class. This file supplies exactly that missing layer, and it is what
+# lets an AI agent operate the rig without guessing.
+#
+# Generate a starting point for any device with:
+#     labwire-ophyd annotate ophyd.sim:motor -o labwire-ophyd.yaml
+version: 1
+
+devices:
+  ophyd.sim.SynAxis:
+    description: >-
+      A single-axis sample stage. Moving it changes where the beam strikes
+      the sample.
+    intent_tags: [motion, positioning]
+    components:
+      readback:
+        unit: mm
+        qudt_quantity_kind: Length
+        description: Current stage position.
+        # ophyd infers dtype from whatever the signal currently holds, so an
+        # axis resting at integer 0 is reported as an integer. Pin it, or the
+        # generated command would refuse a half-millimetre move.
+        dtype: float64
+      setpoint:
+        unit: mm
+        qudt_quantity_kind: Length
+        description: Commanded stage position.
+        dtype: float64
+      velocity:
+        unit: mm/s
+        description: Traverse speed.
+      acceleration:
+        unit: mm/s2
+        description: Traverse acceleration.
+    commands:
+      # SynAxis inherits Device.trigger(), which means nothing for a stage.
+      trigger:
+        exclude: true
+      move:
+        description: >-
+          Move the sample stage to a position in mm and wait until it
+          arrives. Irreversible in the sense that the sample is displaced,
+          so it requires operator confirmation.
+        estimated_duration_s: 2.0
+
+  ophyd.sim.SynGauss:
+    description: >-
+      A point detector whose response peaks when the stage sits at the
+      beam centre.
+    intent_tags: [detector, acquisition]
+    components:
+      val:
+        unit: "{counts}"
+        description: Detected intensity for the stage's current position.
+        # ophyd lets this be written, but it is a computed reading: writing to
+        # it would fabricate data rather than measure anything.
+        settable: false
+      Imax:
+        unit: "{counts}"
+        description: Peak intensity of the response.
+      center:
+        unit: mm
+        qudt_quantity_kind: Length
+        description: Stage position at which the response peaks.
+      sigma:
+        unit: mm
+        qudt_quantity_kind: Length
+        description: Width of the response.
+      noise_multiplier:
+        unit: "1"
+        description: Scale factor applied to simulated noise.
+      # `noise` selects a noise model by name. It is a choice, not a
+      # measurement, so it is deliberately not exposed rather than being
+      # given a meaningless unit.
+      noise:
+        exclude: true
+    commands:
+      trigger:
+        description: >-
+          Acquire one reading at the stage's current position. Reversible
+          and consumes nothing, so no confirmation is required.
