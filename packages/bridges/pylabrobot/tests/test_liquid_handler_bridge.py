@@ -493,7 +493,9 @@ async def test_an_approved_grant_moves_the_plate_and_binds_to_it(
         handle = await client.submit("move_plate", params, authorization=grant.grant_id)
         moved = await handle.result(timeout=20.0)
         assert moved["to"] == "labwire:deck/staging-0"
-        assert moved["origin"] == "labwire:deck/deck"
+        # standing directly on the deck: origin is the deck resource, never
+        # the doubled "labwire:deck/deck"
+        assert moved["origin"] == "labwire:deck"
 
         # a valid, unexpired, correct-command grant on OTHER parameters
         with pytest.raises(AuthorizationRequiredError) as mismatched:

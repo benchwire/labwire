@@ -35,6 +35,52 @@ DILUENT_VOLUME_UL = 100.0
 STEP_VOLUME_UL = 100.0
 
 
+def _quiet(backend: LiquidHandlerChatterboxBackend) -> LiquidHandlerChatterboxBackend:
+    """Silence the chatterbox backend's operation tables.
+
+    The chatterbox prints an honest table for every simulated operation,
+    which is exactly right for a terminal and exactly wrong for a screen
+    recording. Tracking and validation live in PyLabRobot's frontend, so
+    swallowing the backend's stdout changes nothing but noise. Opt-in via
+    DEMO_QUIET=1; off by default.
+    """
+    import contextlib
+    import io
+    from collections.abc import Awaitable, Callable
+    from typing import Any
+
+    for name in (
+        "setup",
+        "stop",
+        "pick_up_tips",
+        "drop_tips",
+        "aspirate",
+        "dispense",
+        "pick_up_tips96",
+        "drop_tips96",
+        "aspirate96",
+        "dispense96",
+        "pick_up_resource",
+        "move_picked_up_resource",
+        "drop_resource",
+    ):
+        original = getattr(backend, name, None)
+        if original is None:
+            continue
+
+        def silenced(
+            *args: Any, _fn: Callable[..., Awaitable[Any]] = original, **kwargs: Any
+        ) -> Awaitable[Any]:
+            async def run() -> Any:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    return await _fn(*args, **kwargs)
+
+            return run()
+
+        setattr(backend, name, silenced)
+    return backend
+
+
 async def build_liquid_handler() -> LiquidHandler:
     """A configured liquid handler with tips and two plates, ready to serve.
 
@@ -47,9 +93,10 @@ async def build_liquid_handler() -> LiquidHandler:
         >>> # handler = await build_liquid_handler()
     """
     deck = STARLetDeck()
-    handler = LiquidHandler(
-        backend=LiquidHandlerChatterboxBackend(num_channels=CHANNELS), deck=deck
-    )
+    backend = LiquidHandlerChatterboxBackend(num_channels=CHANNELS)
+    if os.environ.get("DEMO_QUIET") == "1":
+        backend = _quiet(backend)
+    handler = LiquidHandler(backend=backend, deck=deck)
     await handler.setup()
     deck.assign_child_resource(hamilton_96_tiprack_1000uL_filter(name="tips"), rails=1)
     deck.assign_child_resource(Cor_96_wellplate_360ul_Fb(name="source_plate"), rails=7)

@@ -93,6 +93,16 @@ there with its residual stated.
   from any `resource_ref` you cannot fill; treat `-32010`/`-32011`/`-32012`
   per their `details`, which carry the recovery paths.
 
+### Fixed
+
+- Gripper move results in the PyLabRobot bridge reported the doubled origin
+  `labwire:deck/deck` for labware standing directly on the deck, a URI that
+  does not resolve. The origin is now the deck resource itself. Caught on
+  the first live end-to-end run of the agent demo, which also fixed the
+  demo's operator-approval harness: the S3 refusal arrives in a turn that
+  still ends in `tool_use`, so the pending request id has to be remembered
+  across turns or the operator never gets asked.
+
 ## 0.2.1, 2026-07-27
 
 Protocol version stays `"0.2"`: no message shape changed.

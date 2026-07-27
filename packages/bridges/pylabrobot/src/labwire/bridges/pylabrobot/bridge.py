@@ -465,8 +465,13 @@ class PyLabRobotBridge(Instrument):
         thing = resolve(self._lh, moved_uri)
         destination = resolve(self._lh, to_uri)
         self._refuse_locked([thing, destination])
-        origin_name = getattr(getattr(thing, "parent", None), "name", None)
-        origin = f"{DECK_URI}/{origin_name}" if origin_name else DECK_URI
+        parent = getattr(thing, "parent", None)
+        # Standing directly on the deck, the origin is the deck resource
+        # itself, not "labwire:deck/<deck's own name>".
+        if parent is None or parent is self._lh.deck:
+            origin = DECK_URI
+        else:
+            origin = f"{DECK_URI}/{parent.name}"
         operation = getattr(self._lh, op)
         await self._operate(ctx, operation(thing, destination), op)
         self._publish_state()

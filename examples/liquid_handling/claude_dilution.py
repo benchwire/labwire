@@ -60,6 +60,8 @@ exactly the same call.
 Units are UCUM codes given per parameter; volumes are in uL. If a call fails, the \
 error names what would have worked.
 
+Style: narrate briefly in plain sentences; no markdown, no em dashes.
+
 When the series is done and the plate is moved, stop calling tools and reply with one \
 line: FINAL: {{{{"steps_completed": <n>}}}}"""
 
@@ -176,9 +178,14 @@ async def execute_tool(
                 {"error": str(exc), "category": getattr(exc, "category", None), "details": details}
             )
         return f"ERROR: {exc}"
-    if spec.name in {"transfer", "dispense"}:
+    if spec.name in {"transfer", "dispense", "move_plate", "move_lid", "move_resource"}:
         transfers.append(handle.command_id)
     return json.dumps(result)
+
+
+def _snip(text: str, limit: int) -> str:
+    """Trim a log line, marking the cut so it does not look like lost output."""
+    return text if len(text) <= limit else text[:limit] + " ..."
 
 
 def _pending_request_id(results: list[dict[str, Any]]) -> str | None:
@@ -226,6 +233,7 @@ async def prepare(rig: DilutionRig, steps: int) -> None:
     )
     for well in dilution_wells(steps):
         await rig.call("set_well_volume", {"well": well, "volume_ul": DILUENT_VOLUME_UL})
+    print("machine: simulated liquid handler (PyLabRobot chatterbox backend, no hardware)")
     print(
         f"operator loaded the deck: {DYE_VOLUME_UL:.0f} uL dye in the source plate, "
         f"{DILUENT_VOLUME_UL:.0f} uL diluent in {steps} dilution wells\n"
@@ -247,6 +255,7 @@ async def run_claude(rig: DilutionRig, api_key: str, steps: int, transfers: list
         {"role": "user", "content": "The deck is loaded. Run the dilution series."}
     ]
     operator_acted = False
+    pending_request: str | None = None
     for _ in range(MAX_ROUNDS):
         response = await anthropic.messages.create(
             model=model,
@@ -261,24 +270,27 @@ async def run_claude(rig: DilutionRig, api_key: str, steps: int, transfers: list
                 print(f"claude: {block.text.strip()}")
             elif block.type == "tool_use":
                 arguments: dict[str, Any] = dict(block.input)
-                print(f"  tool -> {block.name} {json.dumps(arguments)[:160]}")
+                print(f"  tool -> {block.name} {_snip(json.dumps(arguments), 160)}")
                 output = await execute_tool(rig.client, registry, block.name, arguments, transfers)
-                print(f"  tool <- {output[:220]}")
+                print(f"  tool <- {_snip(output, 220)}")
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         messages.append({"role": "assistant", "content": response.content})
+        # The refusal arrives in a turn that still ends in tool_use; the agent
+        # then stops in a LATER turn to report it, so the pending request id
+        # has to be remembered across turns.
+        pending_request = _pending_request_id(results) or pending_request
         if response.stop_reason != "tool_use":
-            # If the agent stopped because an S3 call was refused, the OPERATOR
-            # (this harness, playing that role on the same machine) approves
-            # the pending request and hands the agent a single-use grant id.
-            request_id = _pending_request_id(results)
-            if request_id and not operator_acted:
+            # The agent stopped after an S3 refusal, so the OPERATOR (this
+            # harness, playing that role on the same machine) approves the
+            # pending request and hands the agent a single-use grant id.
+            if pending_request and not operator_acted:
                 operator_acted = True
-                grant_id = _operator_approves(rig, request_id)
+                grant_id = _operator_approves(rig, pending_request)
                 messages.append(
                     {
                         "role": "user",
                         "content": (
-                            f"Operator here. I reviewed request {request_id} on the "
+                            f"Operator here. I reviewed request {pending_request} on the "
                             f"instrument host and approved it: grant id {grant_id}, "
                             "single use, expires in 15 minutes. Proceed with exactly "
                             "the call you reported."
