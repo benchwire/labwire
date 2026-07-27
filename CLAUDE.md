@@ -79,7 +79,7 @@ Work M0→M7 strictly in order. Per milestone: **one conventional commit**
   `confirmation` on submit. Recovery paths (clearing an interlock, e-stop)
   are S0 so they stay submittable while interlocked.
 - The UCUM discipline and the S0-S3 taxonomy come from LAP
-  (arXiv:2606.03755) and MUST keep their credit in SPEC §16 and PRIOR_ART.md.
+  (arXiv:2606.03755) and MUST keep their credit in SPEC §17 and PRIOR_ART.md.
 - Comparisons to other protocols stay factual and never disparaging; LAP in
   particular gets treated with respect. Never claim LAP compatibility or
   endorsement.

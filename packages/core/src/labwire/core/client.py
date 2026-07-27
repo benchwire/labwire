@@ -187,7 +187,7 @@ class TelemetrySubscription:
 
 
 class EventStream:
-    """Async iterator over pushed instrument events (SPEC §10).
+    """Async iterator over pushed instrument events (SPEC §11).
 
     Registered at creation time, so no events are missed between creating
     the stream and first iterating it. Call :meth:`close` (or exit the
@@ -366,7 +366,7 @@ class LabwireClient:
         return TelemetrySubscription(self, channels, max_rate_hz)
 
     def events(self) -> EventStream:
-        """Stream instrument events as they arrive (SPEC §10).
+        """Stream instrument events as they arrive (SPEC §11).
 
         Example:
             >>> # async with client.events() as events:

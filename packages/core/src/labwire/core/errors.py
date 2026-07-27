@@ -1,4 +1,4 @@
-"""Labwire domain errors (SPEC §11).
+"""Labwire domain errors (SPEC §12).
 
 Every error carries a JSON-RPC code, a category string, and a ``retryable``
 flag agents key retry policy off.
@@ -46,7 +46,7 @@ class LabwireError(Exception):
         cls._registry.setdefault(cls.code, cls)
 
     def to_wire(self) -> JsonRpcError:
-        """Serialize to the SPEC §11.2 error object.
+        """Serialize to the SPEC §12.2 error object.
 
         Example:
             >>> BusyError("full").to_wire().data.category
@@ -134,10 +134,31 @@ class InternalError(LabwireError):
 
 
 class ConfirmationRequiredError(LabwireError):
-    """An S2/S3 command was submitted without an acceptable confirmation."""
+    """An S2 command was submitted without an acceptable confirmation."""
 
     code = -32009
     category = "confirmation_required"
+
+
+class UnknownReferenceError(LabwireError):
+    """A resource_ref value, or a resource/read URI, does not resolve (SPEC §10.4)."""
+
+    code = -32010
+    category = "unknown_reference"
+
+
+class AuthorizationRequiredError(LabwireError):
+    """An S3 command was submitted without a verifiable operator grant (SPEC §8.6)."""
+
+    code = -32011
+    category = "authorization_required"
+
+
+class StaleRevisionError(LabwireError):
+    """An if_revision precondition did not match the current revision (SPEC §10.5)."""
+
+    code = -32012
+    category = "stale_revision"
 
 
 class InvalidRequestError(LabwireError):
@@ -164,7 +185,7 @@ class InvalidParamsError(LabwireError):
 def error_from_wire(wire: JsonRpcError) -> LabwireError:
     """Reconstruct the typed error for a wire error object.
 
-    Unknown codes fall back to :class:`LabwireError`; per SPEC §11.2, errors
+    Unknown codes fall back to :class:`LabwireError`; per SPEC §12.2, errors
     lacking ``data.retryable`` are treated as not retryable.
 
     Example:

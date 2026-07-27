@@ -152,7 +152,7 @@ Physical typing and safety classification, adopted from
 
 - `confirmation` proves deployment policy, not operator identity. LAP-style
   cryptographic operator binding is a roadmap item; do not treat v0.2
-  confirmation as an audit control (SPEC §13).
+  confirmation as an audit control (SPEC §14).
 - Unit codes are validated for presence, not UCUM grammar.
 
 ## 0.1.0, 2026-07-23

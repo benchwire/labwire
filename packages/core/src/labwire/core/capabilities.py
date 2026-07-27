@@ -317,7 +317,7 @@ class _SpecModel(BaseModel):
 
 
 class IdentityInfo(_SpecModel):
-    """Instrument identity (SPEC §7.1); embedded verbatim in manifests (§12).
+    """Instrument identity (SPEC §7.1); embedded verbatim in manifests (§13).
 
     Example:
         >>> IdentityInfo(
@@ -464,6 +464,31 @@ class ChannelSpec(_SpecModel):
         return self
 
 
+class ResourceSpec(_SpecModel):
+    """A declared resource (SPEC §7.6): addressable, typed, readable state.
+
+    Field-shape validation only in this milestone; the content-schema unit
+    rule and reference-closure checks land with the server implementation.
+
+    Example:
+        >>> ResourceSpec(
+        ...     uri="labwire:syringe", kind="consumable", title="Syringe",
+        ...     description="The installed syringe.", item_kinds=[],
+        ...     revision="r-1", content_schema={"type": "object",
+        ...     "additionalProperties": False},
+        ... ).kind
+        'consumable'
+    """
+
+    uri: str
+    kind: str
+    title: str
+    description: str
+    item_kinds: list[str]
+    revision: str
+    content_schema: dict[str, Any]
+
+
 class InterlockSpec(_SpecModel):
     """A declared safety interlock (SPEC §7.4).
 
@@ -498,4 +523,6 @@ class InstrumentDescriptor(_SpecModel):
     commands: list[CommandSpec]
     channels: list[ChannelSpec]
     interlocks: list[InterlockSpec]
+    resources: list[ResourceSpec] = []
+    """REQUIRED of v0.3 servers (SPEC §7.1); tolerated absent on receipt."""
     max_concurrent_commands: int = 1

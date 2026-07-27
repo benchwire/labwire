@@ -1,4 +1,4 @@
-"""Tests for RFC 8785 (JCS) canonicalization (SPEC §12.2)."""
+"""Tests for RFC 8785 (JCS) canonicalization (SPEC §13.2)."""
 
 import math
 

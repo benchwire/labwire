@@ -20,6 +20,7 @@ def test_registry_covers_every_spec_method() -> None:
         "initialize",
         "ping",
         "instrument/describe",
+        "resource/read",
         "command/submit",
         "command/status",
         "command/cancel",

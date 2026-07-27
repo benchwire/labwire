@@ -325,7 +325,7 @@ async def test_blank_confirmation_is_not_a_confirmation() -> None:
 async def test_validation_precedes_confirmation(
     rig: tuple[SafetyRig, InstrumentServer, LabwireClient],
 ) -> None:
-    """An unconfirmable request that could never run fails as validation (SPEC §11.1)."""
+    """An unconfirmable request that could never run fails as validation (SPEC §12.1)."""
     from labwire.core import ValidationError
 
     with pytest.raises(ValidationError):

@@ -1,4 +1,4 @@
-"""ed25519 run-manifest signing and verification (SPEC §12).
+"""ed25519 run-manifest signing and verification (SPEC §13).
 
 The signature covers the RFC 8785 canonicalization of the manifest minus
 its ``signature`` field, and is encoded as unpadded base64url.
@@ -78,12 +78,12 @@ class SigningKey:
 
     @property
     def public_key_b64(self) -> str:
-        """The 32-byte public key, standard base64 (SPEC §12.1)."""
+        """The 32-byte public key, standard base64 (SPEC §13.1)."""
         return base64.b64encode(bytes(self._raw.verify_key)).decode()
 
     @property
     def key_id(self) -> str:
-        """``sha256:`` + hex SHA-256 of the raw public key (SPEC §12.1)."""
+        """``sha256:`` + hex SHA-256 of the raw public key (SPEC §13.1)."""
         return "sha256:" + hashlib.sha256(bytes(self._raw.verify_key)).hexdigest()
 
     def sign(self, message: bytes) -> bytes:
@@ -96,7 +96,7 @@ class _M(BaseModel):
 
 
 class ManifestCommand(_M):
-    """The submitted command, verbatim, and its enforced class (SPEC §12.1)."""
+    """The submitted command, verbatim, and its enforced class (SPEC §13.1)."""
 
     name: str
     params: dict[str, Any]
@@ -104,7 +104,7 @@ class ManifestCommand(_M):
 
 
 class ManifestData(_M):
-    """Digest of the run's record stream (SPEC §12.1)."""
+    """Digest of the run's record stream (SPEC §13.1)."""
 
     digest_alg: str
     digest: str
@@ -112,7 +112,7 @@ class ManifestData(_M):
 
 
 class ManifestTimestamps(_M):
-    """RFC 3339 UTC run timestamps (SPEC §12.1)."""
+    """RFC 3339 UTC run timestamps (SPEC §13.1)."""
 
     submitted: str
     started: str
@@ -120,7 +120,7 @@ class ManifestTimestamps(_M):
 
 
 class SignerInfo(_M):
-    """Key identification for the manifest signature (SPEC §12.1)."""
+    """Key identification for the manifest signature (SPEC §13.1)."""
 
     alg: str
     public_key: str
@@ -128,7 +128,7 @@ class SignerInfo(_M):
 
 
 class Manifest(_M):
-    """The SPEC §12.1 run manifest document (optionally signed).
+    """The SPEC §13.1 run manifest document (optionally signed).
 
     Example:
         >>> # Manifest.model_validate(json.loads(bundle_manifest_json))
@@ -174,7 +174,7 @@ def sign_manifest(manifest: dict[str, Any], key: SigningKey) -> dict[str, Any]:
 
 
 def verify_manifest(doc: dict[str, Any]) -> VerificationResult:
-    """Verify a signed manifest's key_id and signature (SPEC §12.2).
+    """Verify a signed manifest's key_id and signature (SPEC §13.2).
 
     Example:
         >>> # outcome = verify_manifest(json.loads(manifest_json))
@@ -229,7 +229,7 @@ def verify_bundle(path: Path) -> VerificationResult:
     try:
         parsed = Manifest.model_validate(doc)
     except Exception as exc:
-        errors.append(f"manifest does not match SPEC §12.1: {exc}")
+        errors.append(f"manifest does not match SPEC §13.1: {exc}")
         return VerificationResult(ok=False, errors=errors)
     records_path = manifest_path.parent / "records.jsonl"
     if records_path.exists():

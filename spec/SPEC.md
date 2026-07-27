@@ -1,7 +1,7 @@
 # Labwire Protocol Specification
 
-**Version:** 0.2.1 (Draft)
-**Protocol version string:** `"0.2"`
+**Version:** 0.3.0 (Draft)
+**Protocol version string:** `"0.3"`
 **Date:** 2026-07-27
 **License:** Apache-2.0
 
@@ -14,12 +14,18 @@ agents, both human-operated software and autonomous AI systems, a universal
 way to **discover** an instrument's capabilities, **command** it, **stream**
 its measurements, and receive **cryptographically signed** records of what was
 done. The protocol is JSON-RPC 2.0 over WebSocket or stdio, with a capability
-discovery model inspired by the Model Context Protocol (MCP).
+discovery model inspired by the Model Context Protocol (MCP). Version 0.3
+adds three things v0.2 could not express: **resources** (addressable, typed,
+readable instrument state, such as a liquid handler's deck), **typed
+references** (parameters that name a resource item rather than carrying an
+uninterpreted string), and **operator grants** (an S3 authorization an agent
+structurally cannot produce, bound to a command and to a digest of its exact
+parameters).
 
 This document is a **draft**. It is developed alongside a working reference
-implementation; §14.2 states exactly which parts of this specification that
+implementation; §15.2 states exactly which parts of this specification that
 implementation realizes. Breaking changes are expected before 1.0, and v0.2
-already makes some (§17).
+already makes some (§18).
 
 ## 2. Terminology & Conformance
 
@@ -40,10 +46,14 @@ when, and only when, they appear in all capitals, as shown here.
   instrument's descriptor (§7) and executed via the command lifecycle (§8).
 - **Run:** a single execution of a command, identified by a `command_id`.
 - **Channel:** a typed, named stream of measurements (§7, §9).
-- **Event:** a discrete occurrence reported by the server (§10).
+- **Event:** a discrete occurrence reported by the server (§11).
 - **Interlock:** a declared safety condition which, while tripped, prevents
-  command execution (§7, §8, §10).
-- **Run manifest:** a signed record of a completed run (§12).
+  command execution (§7, §8, §11).
+- **Resource:** a named, URI-identified piece of instrument state, declared
+  in the descriptor and read with `resource/read` (§7.6, §10).
+- **Operator grant:** an out-of-band-provisioned authorization for one S3
+  command with one exact parameter set (§8.6).
+- **Run manifest:** a signed record of a completed run (§13).
 
 All JSON field names defined by this protocol use `snake_case`. Unless
 otherwise stated, unrecognized fields MUST be ignored by both parties
@@ -68,6 +78,9 @@ Agent Client                                   Instrument Server
      │  instrument/describe ──────────────────────────▶│
      │◀──────────────── result: InstrumentDescriptor   │
      │                                                 │
+     │  resource/read {uri} ──────────────────────────▶│
+     │◀──────────────── result: {revision, index, ...} │
+     │                                                 │
      │  command/submit {command, params} ─────────────▶│
      │◀──────────────── result: {command_id, accepted} │
      │◀─────────── notifications/command_status (push) │
@@ -79,8 +92,9 @@ Agent Client                                   Instrument Server
      │                                                 │
 ```
 
-A typical agent session: initialize → describe → submit a command → watch
-pushed status until a terminal state → read telemetry → repeat → disconnect.
+A typical agent session: initialize → describe → read the resources the
+descriptor declares → submit a command → watch pushed status until a terminal
+state → read telemetry → repeat → disconnect.
 
 ### 3.1 JSON-RPC usage
 
@@ -94,7 +108,7 @@ pushed status until a terminal state → read telemetry → repeat → disconnec
 ## 4. Versioning & Negotiation
 
 The protocol version is a string of the form `"MAJOR.MINOR"`. This document
-specifies protocol version `"0.2"`.
+specifies protocol version `"0.3"`.
 
 - The client states its protocol version in `initialize`.
 - The server replies with the protocol version **it will speak**: the highest
@@ -103,10 +117,10 @@ specifies protocol version `"0.2"`.
   MUST close the connection.
 - Servers SHOULD accept any client version that shares their MAJOR version.
   For MAJOR version 0, the MINOR version carries compatibility significance:
-  servers SHOULD reply with exactly `"0.2"` if they implement this document.
+  servers SHOULD reply with exactly `"0.3"` if they implement this document.
 
 The specification document itself is versioned `MAJOR.MINOR.PATCH`
-(this document: 0.2.1); PATCH revisions never change the wire protocol.
+(this document: 0.3.0); PATCH revisions never change the wire protocol.
 
 ## 5. Transports
 
@@ -123,7 +137,7 @@ transport's job, and exactly one JSON-RPC message occupies one frame.
 - WebSocket protocol-level ping/pong frames MAY be used for keepalive by
   either party.
 - Servers MAY serve plaintext `ws://` on loopback or isolated lab networks;
-  deployments crossing any network boundary SHOULD use `wss://` (see §13).
+  deployments crossing any network boundary SHOULD use `wss://` (see §14).
 - Port 9520 is the RECOMMENDED default port. This is a convention, not a
   requirement. <!-- TODO-VERIFY: 9520 unassigned in the IANA Service Name and
   Transport Protocol Port Number Registry -->
@@ -148,7 +162,7 @@ The first message in a session MUST be an `initialize` request from the
 client. **Initialization completes when the server receives
 `notifications/initialized`.** Requests other than `ping` received before
 that point MUST be rejected with error `-32002` (`busy`), with
-`retryable: false` (§11.1). An `initialize` request received after
+`retryable: false` (§12.1). An `initialize` request received after
 initialization has completed MUST be rejected with `-32600` (invalid
 request).
 
@@ -159,7 +173,7 @@ request).
   software.
 - `capabilities` (object, REQUIRED): reserved for client capability flags;
   MAY be empty in v0.2.
-- `api_key` (string, OPTIONAL): see §13.
+- `api_key` (string, OPTIONAL): see §14.
 
 `initialize` result:
 
@@ -168,10 +182,19 @@ request).
 - `server_info` (object, REQUIRED): `{name, version}` identifying the server
   software.
 - `capabilities` (object, REQUIRED): server capability flags. Defined in
-  v0.2: `telemetry` (boolean), `events` (boolean), and `manifests`
-  (boolean: the server produces signed run manifests, §12). Absent flags
-  default to `false`. A request for a method belonging to a capability the server
-  advertised as `false` MUST be rejected with `-32001` (`unsupported`).
+  v0.3: `telemetry` (boolean), `events` (boolean), `manifests`
+  (boolean: the server produces signed run manifests, §13), `resources`
+  (boolean: the server answers `resource/read`, §10), and `grants`
+  (boolean: the server holds an operator grant store, §8.6). Absent flags
+  default to `false`. A request for a method belonging to a capability the
+  server advertised as `false` MUST be rejected with `-32001`
+  (`unsupported`).
+
+  A server that declares any `S3` command and advertises `grants: false` is
+  **non-conforming and MUST refuse to start**: a server with hazardous
+  commands and no way to authorize them is misconfigured, not permissive.
+  Likewise a server whose commands carry `resource_ref` declarations (§7.2)
+  MUST advertise `resources: true`.
 
 After receiving the result, the client MUST send the
 `notifications/initialized` notification before any other message. The
@@ -202,7 +225,7 @@ A server MAY accept multiple simultaneous sessions. Session-scoped rules:
   that submitted it. `command/status` polling MUST work from any session
   that presents the `command_id`.
 - Telemetry notifications are delivered only to the subscribing session.
-- Events (§10) are delivered to every operational session.
+- Events (§11) are delivered to every operational session.
 - `max_concurrent_commands` (§8.4) is a per-instrument limit shared across
   all sessions.
 
@@ -223,10 +246,16 @@ without out-of-band knowledge.
     image, when known. Simulated instruments SHOULD hash their implementing
     code's version identity instead.
 
-  This identity object is embedded verbatim in run manifests (§12).
+  This identity object is embedded verbatim in run manifests (§13).
 - `commands` (array, REQUIRED): see §7.2.
 - `channels` (array, REQUIRED): see §7.3.
 - `interlocks` (array, REQUIRED): see §7.4.
+- `resources` (array, REQUIRED): see §7.6. `[]` when the instrument exposes
+  no resources; an instrument with no tree-shaped state loses nothing by
+  saying so. There is deliberately no `resources/list` method: an
+  instrument's resources are as much a property of its kind as its commands
+  are, so they arrive inside `instrument/describe`, the request every client
+  already makes, and discovering them is not a step an agent can skip.
 - `max_concurrent_commands` (integer, OPTIONAL, default `1`): how many
   commands the instrument executes simultaneously (§8.4).
 
@@ -250,6 +279,38 @@ Each entry in `commands`:
   NOT be used; commands that take no parameters declare
   `{"type": "object", "additionalProperties": false}`. The same requirement
   applies to `returns_schema`.
+
+  **Typed references.** A string-typed schema node inside `params_schema`
+  MAY carry a `resource_ref` keyword declaring that its value names an item
+  of a resource rather than being an uninterpreted string:
+
+  ```json
+  {
+    "type": "string",
+    "resource_ref": { "kind": "container", "enumerated_by": "labwire:deck" }
+  }
+  ```
+
+  Both members are REQUIRED. `kind` is a registered or vendor-prefixed kind
+  name (Appendix A) matched against the resolved entry's `kinds` array
+  (§10.2). `enumerated_by` is the URI of a resource declared in this
+  descriptor whose `item_kinds` contains `kind`; a declaration violating
+  either condition is invalid, and servers MUST refuse to serve it. The
+  keyword rides *inside* the schema deliberately: `params_schema` is the
+  object that travels verbatim into agent tool schemas, so the pointer to
+  where valid values live reaches the agent at the exact parameter it cannot
+  fill, with no side table for an adapter to forget. Unknown keywords are
+  ignored by ordinary JSON Schema validators, so the schema stays legal
+  draft 2020-12.
+
+  A node carrying `resource_ref` MUST NOT also declare a `pattern`: a
+  pattern is satisfiable by invention, which is precisely the failure typed
+  references exist to remove. `resource_ref` is permitted only inside
+  `params_schema`, not in `returns_schema` or channel declarations, in
+  v0.3. Reference values are validated against current resource state at
+  submission (§10.4); the semantics of that check, and the error a failure
+  produces, are protocol-defined so the reference vocabulary is shared by
+  every instrument rather than invented per bridge.
 - `unit_annotations` (object, REQUIRED): maps parameter name → **UCUM
   case-sensitive unit code** (e.g. `"mL/min"`, `"Cel"`, `"g"`, `"V"`).
   **Every parameter that carries a number MUST have an entry**, and
@@ -351,9 +412,9 @@ Each entry in `interlocks`:
 - `tripped` (boolean, REQUIRED): whether the interlock is tripped at the
   time the `instrument/describe` response is produced. Consumers MUST treat
   this as a snapshot, kept current only via the `interlock/tripped` and
-  `interlock/cleared` events (§10).
+  `interlock/cleared` events (§11).
 
-Interlock behavior is specified in §8.5 and §10.
+Interlock behavior is specified in §8.5 and §11.
 
 ### 7.5 Vendor extensions
 
@@ -362,6 +423,62 @@ Command names and event names beginning with `x-<vendor>/` (e.g.
 exclusively for this form. Servers MAY expose them; clients MUST NOT assume
 their presence. Extension commands MUST still be declared in `commands` with
 full schemas.
+
+### 7.6 Resource declaration
+
+A **resource** is addressable, typed, readable instrument state: the deck of
+a liquid handler, the installed syringe of a pump. Commands describe what an
+instrument can *do*; resources describe what *exists to do it to*. Each
+entry in `resources`:
+
+- `uri` (string, REQUIRED): the resource's identifier, unique within the
+  instrument. See §10.1 for the scheme.
+- `kind` (string, REQUIRED): what the resource is, from the registry
+  (Appendix A) or vendor-prefixed (`<vendor>.<name>`).
+- `title` (string, REQUIRED): short human/agent-readable label.
+- `description` (string, REQUIRED): what the resource contains, what its
+  index enumerates, and when it changes, in enough detail for an agent to
+  decide when to read it. Servers SHOULD state here which command
+  parameters draw their valid values from this resource's index.
+- `item_kinds` (array of strings, REQUIRED): every kind that can appear in
+  this resource's index (§10.2), so the closure of `resource_ref`
+  declarations is checkable from the descriptor alone. `[]` for a resource
+  with no index.
+- `revision` (string, REQUIRED): the revision at the time the descriptor
+  was produced, a snapshot exactly as `interlocks[].tripped` is (§10.3).
+- `content_schema` (object, REQUIRED): a JSON Schema (draft 2020-12) object
+  describing the `content` member of a read result. The closed-schema
+  requirement of §7.2 applies unchanged.
+
+  **Units inside content.** Every schema node in `content_schema` that
+  describes a `number` or `integer` MUST carry a `unit` keyword holding a
+  UCUM case-sensitive code (`"1"` for dimensionless):
+
+  ```json
+  { "type": "number", "unit": "uL" }
+  ```
+
+  Resource content is state, state carries quantities, and shipping a
+  units-optional state format inside a units-mandatory protocol would
+  reopen the hole §7.2 closed, one surface over. The `unit` keyword is
+  scoped to `content_schema` in v0.3: it is NOT permitted in
+  `params_schema` or `returns_schema`, whose units remain declared in
+  `unit_annotations` and `returns_units`. Two annotation schemes exist, but
+  they apply to disjoint surfaces and neither is optional, so there is
+  never a question of which one to use. Unknown keywords are ignored by
+  ordinary JSON Schema validators, so the schema stays legal draft 2020-12.
+  The term `unit`, and the placement of semantics inside the data schema
+  rather than in a side table, follow W3C Web of Things Thing Description
+  practice (§17). <!-- TODO-VERIFY: the exact member name and section in
+  WoT Thing Description 1.1 before citing it more precisely. -->
+
+Resources are **read-only** in v0.3. Anything that changes instrument state
+remains a command, so every state change stays classed, confirmed,
+recorded, and signed; `set_well_volume` remains a command. A server MUST
+refuse to start if any `resource_ref` in its commands names a resource not
+declared here, or a `kind` absent from that resource's `item_kinds`: the
+graph from parameter to kind to enumerating resource is provably closed
+before a descriptor is ever served.
 
 ## 8. Command Lifecycle
 
@@ -397,16 +514,32 @@ Legal transitions: `accepted → running | canceling | failed`;
 `command/submit` params: `command` (string, REQUIRED: a declared command
 name), `params` (object, REQUIRED, validated against the command's
 `params_schema`; MAY be `{}`), `confirmation` (string, OPTIONAL, required
-for `S2`/`S3` commands, see §8.6).
+for `S2` commands, see §8.6), `authorization` (object, OPTIONAL, required
+for `S3` commands, see §8.6: `{"grant_id": "<id>"}`), and `if_revision`
+(object, OPTIONAL: maps resource URI → the revision the client planned
+against, see §10.5).
 
-An undeclared `command` name MUST be rejected with `-32001` (`unsupported`).
-If `params` violate the command's `params_schema`, the server MUST reject
-the request with `-32000` (`validation`). If the command's `safety_class` is
-`S2` or `S3` and no acceptable `confirmation` is supplied, the server MUST
-reject it with `-32009` (`confirmation_required`) (§8.6). In all these cases
-the server MUST NOT create a run. Otherwise the server assigns a
-`command_id` (string, unique per instrument, RECOMMENDED: UUIDv4) and
-responds `{command_id, status: "accepted"}`.
+Submission checks run in the precedence order of §12.1. An undeclared
+`command` name MUST be rejected with `-32001` (`unsupported`); `params`
+violating the command's `params_schema` with `-32000` (`validation`); a
+reference value that does not resolve with `-32010` (`unknown_reference`,
+§10.4); a stale `if_revision` with `-32012` (`stale_revision`, §10.5); a
+missing or unacceptable `confirmation` or `authorization` with `-32009`
+(`confirmation_required`) or `-32011` (`authorization_required`) (§8.6).
+In all these cases the server MUST NOT create a run. Otherwise the server
+assigns a `command_id` (string, unique per instrument, RECOMMENDED: UUIDv4)
+and responds `{command_id, status: "accepted"}`.
+
+**Normalized parameters.** From validation onward the server MUST use the
+post-validation parameter object, with schema defaults applied, as *the*
+parameters of the run: it is what handlers receive, what the manifest
+records as `command.params` (§13.1), and what the authorization digest is
+computed over (§8.6). The digested thing and the recorded thing therefore
+cannot disagree, and an auditor can recompute the digest offline from the
+bundle. `confirmation`, `authorization`, and `if_revision` are envelope
+fields, not parameters: they are never part of the normalized object or
+the digest, so re-reading a resource after an operator approves a call
+cannot invalidate the approval.
 
 **Status is push-first.** On every state transition out of `accepted`, the
 server MUST send `notifications/command_status` to the submitting session
@@ -424,9 +557,15 @@ object:
   only `progress`.
 - `result` (any, OPTIONAL): present iff `status` is `succeeded`; conforms to
   the command's `returns_schema` if declared.
-- `error` (object, OPTIONAL): an Error object (§11.2); present iff
+- `error` (object, OPTIONAL): an Error object (§12.2); present iff
   `status` is `failed`, except that servers MAY additionally attach an
   error with category `canceled` (code `-32006`) to `canceled` runs.
+- `resource_revisions` (array, OPTIONAL): on a **terminal** status, the
+  resources this run changed, as `[{uri, revision}]` with each resource's
+  revision after the run. This is the write-returns-the-new-revision
+  pattern of HTTP conditional requests (§17): an agent that submits every
+  change itself never needs to re-read a resource between steps, because
+  each terminal status hands it the revision to plan the next step against.
 
 `command/status` params `{command_id}` MUST return the current
 CommandStatus; unknown `command_id` → error `-32000` (`validation`).
@@ -457,12 +596,12 @@ An instrument executes at most `max_concurrent_commands` (§7.1) runs
 simultaneously. While at capacity, the server MUST reject `command/submit`
 with error `-32002` (`busy`). The protocol defines **no server-side
 queueing**: queueing, retry, and scheduling are client (agent) policy. The
-capacity `busy` error is retryable (§11.2); servers MAY include
+capacity `busy` error is retryable (§12.2); servers MAY include
 `details.retry_after_s` (number) as a backoff hint.
 
 ### 8.5 Interlocks
 
-While any declared interlock is **tripped** (§10):
+While any declared interlock is **tripped** (§11):
 
 - New `command/submit` requests MUST be rejected with error `-32003`
   (`interlock`): except that a command whose `clears_interlocks` (§7.2)
@@ -474,7 +613,7 @@ While any declared interlock is **tripped** (§10):
   the rule).
 
 The server MUST emit `interlock/tripped` and `interlock/cleared` events
-(§10). How an interlock clears is instrument-defined and MUST be stated in
+(§11). How an interlock clears is instrument-defined and MUST be stated in
 its `description` (e.g. a hard interlock clears only at the instrument;
 a soft interlock clears via a declared command).
 
@@ -485,38 +624,98 @@ LAP ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755); see
 [PRIOR_ART.md](../PRIOR_ART.md)) so that instruments and agents crossing
 between the two protocols classify actions the same way:
 
-| Class | Meaning | Confirmation |
+| Class | Meaning | Requires |
 |---|---|---|
-| `S0` | Emergency or protective operations (stop, vent, clear). Always permitted. | never required |
-| `S1` | Routine and reversible (read a value, set a setpoint). **Default.** | not required |
-| `S2` | Costly or irreversible (consumes reagent, destroys a sample). | REQUIRED |
-| `S3` | Hazardous, capable of harming people or equipment. | REQUIRED |
+| `S0` | Emergency or protective operations (stop, vent, clear). Always permitted. | nothing |
+| `S1` | Routine and reversible (read a value, set a setpoint). **Default.** | nothing |
+| `S2` | Costly or irreversible (consumes reagent, destroys a sample). | `confirmation` |
+| `S3` | Hazardous, capable of harming people or equipment. | an **operator grant** |
 
-Normative rules:
+In v0.2 the two upper classes were gated by the same confirmation string,
+so classifying a command `S3` changed what was printed and recorded and
+nothing about what was permitted. v0.3 makes them different mechanisms:
+`S2` takes a session confirmation an agent can hold; `S3` takes a grant an
+agent structurally cannot produce.
 
-- Servers MUST reject a `command/submit` for an `S2` or `S3` command that
-  carries no `confirmation` value, with error `-32009`
-  (`confirmation_required`), `retryable: false`, and
-  `data.details.safety_class` set to the command's class. Retrying the
-  identical request cannot succeed; the client must obtain confirmation.
-- A server MUST NOT require confirmation for `S0`, and SHOULD NOT for `S1`.
+Normative rules common to both:
+
+- A server MUST NOT require confirmation or authorization for `S0`, and
+  SHOULD NOT for `S1`.
 - Servers MUST NOT downgrade a command's declared class at submission time.
 - `S0` commands MUST remain submittable while an interlock is tripped
   (§8.5), since they are the means of recovery. (A command that clears an
   interlock therefore normally declares `S0` and lists it in
   `clears_interlocks`.)
-- What counts as an acceptable `confirmation` is deployment policy in v0.2.
-  A conforming server MAY accept any non-empty string, MAY compare against a
-  configured token, or MAY implement a stronger scheme.
 
-**Honest limitation.** v0.2 specifies *where* confirmation is enforced, not
-*who* confirmed. A shared token proves an operator configured the deployment
-to permit this class of action; it does not cryptographically bind a named
-operator to a specific task. LAP's design: a JWS operator token bound to
-the exact task and the hash of its canonical parameters, is the more
-complete answer, and adopting an equivalent is a tracked roadmap item
-(§13, [ROADMAP.md](../ROADMAP.md)). Deployments where that distinction
-matters should not treat v0.2 confirmation as an audit control.
+**S2: confirmation.** Servers MUST reject a `command/submit` for an `S2`
+command that carries no acceptable `confirmation` value, with error
+`-32009` (`confirmation_required`), `retryable: false`, and
+`data.details.safety_class` set to `"S2"`. What counts as acceptable is
+deployment policy: a conforming server MAY accept any non-empty string,
+MAY compare against a configured token, or MAY implement a stronger
+scheme. A standing confirmation for a session of routine `S2` work is the
+intended pattern.
+
+**S3: operator grants.** An operator grant is a record in a server-side
+**grant store**, provisioned out of band (configuration or environment,
+e.g. a directory the server reads and an operator tool writes). Normative:
+
+- **The protocol MUST NOT provide any method that creates, modifies,
+  extends, enumerates, or reveals grants, and a conforming implementation
+  MUST NOT add one as a vendor extension.** Whatever an agent can do over
+  this protocol, minting authorization is not part of it.
+- A grant binds, at minimum: the instrument's `serial_number`, one
+  `command` name, one `params_digest`, a validity window
+  (`[not_before, expires_at)`), and a use limit (`max_uses`, with a
+  persistent use count). `params_digest` is
+  `"sha256:" + lowercase-hex(SHA-256(JCS(params)))` over the **normalized**
+  parameter object of §8.2, canonicalized per RFC 8785. Binding an operator
+  authorization to the capability and to a digest of its canonical
+  parameters is LAP's design ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)),
+  adopted here with credit; LAP binds a JWS operator token, and v0.3 keeps
+  the binding while deferring the signature (§14).
+- A `confirmation` value MUST NOT satisfy an `S3` command, whatever it
+  contains.
+- On an `S3` submit that fails authorization, the server MUST reject with
+  `-32011` (`authorization_required`), `retryable: false`, and
+  `data.details` carrying at minimum: `safety_class`, `command`, a
+  `reason` from the enum below, `params_digest`, `digest_alg`,
+  `canonicalization`, and `mintable_by_agent: false`. Before refusing a
+  submission whose only failure is a missing grant, the server SHOULD
+  record a **pending authorization request**, capped in number and
+  expiring, holding the command name, the normalized parameters verbatim,
+  the digest, and the instrument identity, and SHOULD include its
+  `request_id` and a server-configured `operator_instruction` in the error
+  details. A pending request is a description of a request, not an
+  authorization: recording one grants nothing. It exists so the operator's
+  approval tool reads the parameters from the **server's own store**,
+  never from a digest relayed through the agent that wants the approval.
+- `reason` is one of: `absent` (no `authorization`, or a `confirmation`
+  offered instead), `unsupported_scheme`, `unknown`, `command_mismatch`,
+  `params_mismatch`, `instrument_mismatch`, `not_yet_valid`, `expired`,
+  `exhausted`, `revoked`. `params_mismatch` is the reason that proves the
+  binding is to parameters rather than an S3-shaped password: a valid,
+  unexpired grant for the same command still fails on different values.
+- On success the server MUST **atomically** consume one use (increment and
+  persist the count) before creating the run; two concurrent submits MUST
+  NOT both spend the last use of a grant, and a restart MUST NOT resurrect
+  a spent one. Expiry remains the durable bound if the store is lost.
+- A grant id is a bearer value. Servers SHOULD generate ids with at least
+  128 bits of entropy, and MUST NOT write a grant id into any durable
+  artifact (§13.1 records a digest of it instead).
+
+**What a grant proves.** A verified grant proves that someone with write
+access to this server's grant store approved this command name with these
+exact parameter values, as the server itself recorded and displayed them,
+within a time window and a bounded number of uses. It does **not** prove
+who that person was, that the presenter is that person, or that anyone was
+physically present: `issued_by` and `note` fields in a store are labels,
+not authenticated identity. Cryptographic operator identity, a JWS profile
+with key distribution and revocation, remains future work (§14,
+[ROADMAP.md](../ROADMAP.md)). v0.2 proved deployment policy; v0.3 proves
+deployment policy **plus parameter binding plus a bounded window**, and
+still not identity. Deployments where identity matters should not treat a
+v0.3 grant as an audit control over *who*.
 
 ## 9. Streaming Telemetry
 
@@ -565,7 +764,160 @@ coalesce samples, but `seq` MUST remain monotonic per channel so clients can
 detect gaps. Clients MUST NOT assume lossless delivery. Servers MUST deliver
 samples for one channel to one subscription in `seq` order.
 
-## 10. Events
+## 10. Resources
+
+Instrument state that is a tree has to live somewhere. The descriptor is
+static capability discovery; telemetry is unit-bearing scalars in a time
+series; a deck that changes between runs fits neither, which is why v0.2
+implementations smuggled it through ordinary command results that nothing
+marked as special. Resources give it a first-class home: declared in
+discovery (§7.6), read with one method, revisioned so staleness is
+detectable, and indexed so typed references (§7.2) have something
+protocol-defined to resolve against.
+
+### 10.1 URIs
+
+A resource identifier is `labwire:` followed by a rootless path (RFC 3986
+`path-rootless`):
+
+```
+labwire:deck
+labwire:deck/source_plate
+labwire:deck/source_plate/A1
+```
+
+The first segment names a resource declared in the descriptor; further
+segments name items within it. Segment text containing `/`, `?`, `#`, or
+`%` MUST be percent-encoded. There is exactly one spelling of any URI: a
+server MUST reject an alternative form that would resolve to the same
+thing, rather than canonicalizing it.
+
+**Child composition is protocol-defined, and instruments MUST NOT define
+another.** An item URI is `<entry-uri> "/" <id>`, where `<id>` comes from
+the read result's index (§10.2). This one rule is what keeps addressing
+out of per-instrument convention: an agent that can read an index can
+construct every legal reference on any conforming instrument, and there is
+no grammar to learn or to guess. Ids are enumerated rather than templated
+for the same reason: a template is a grammar.
+
+The `labwire:` scheme is provisional and unregistered.
+<!-- TODO-VERIFY: register the scheme with IANA, or confirm the provisional
+form is acceptable, before 1.0. -->
+
+### 10.2 resource/read
+
+`resource/read` params: `uri` (string, REQUIRED): a resource URI declared
+in the descriptor. Reading an item URI is not supported in v0.3; clients
+read the resource and join on the index. An unknown, undeclared, or
+malformed `uri` MUST be rejected with `-32010` (`unknown_reference`,
+`reason: "unknown_resource"` or `"malformed_uri"`), so there is one story
+about URIs that do not resolve rather than two.
+
+Result:
+
+- `uri` (string, REQUIRED): as requested.
+- `kind` (string, REQUIRED): as declared.
+- `revision` (string, REQUIRED): see §10.3.
+- `read_at` (string, REQUIRED): RFC 3339 UTC timestamp of this read.
+- `index_complete` (boolean, REQUIRED): whether `index` enumerates every
+  resolvable reference. A server MAY set `false` for a resource it cannot
+  enumerate exhaustively; it MUST still resolve references correctly, and
+  a client MUST NOT infer non-existence from absence in an incomplete
+  index.
+- `index` (array, REQUIRED): the **reference index**. Each entry:
+  - `uri` (string, REQUIRED): the entry's own URI.
+  - `kinds` (array of strings, REQUIRED): every kind this entry satisfies,
+    most specific first (a trough is `["trough", "container", "labware"]`).
+    A reference declaring kind K resolves to this entry iff K is in this
+    array; there is no subtyping graph in the protocol, the instrument
+    declares the set.
+  - `title` (string, OPTIONAL): a short label.
+  - `children` (object, OPTIONAL): `{kinds, ids}`; the entry has one item
+    per id, each with URI `<entry-uri>/<id>` and the given `kinds`. A
+    96-well plate lists 96 ids rather than a range expression.
+- `content` (REQUIRED): instrument-defined state conforming to the
+  declared `content_schema` (§7.6). Where content describes a referenceable
+  thing it MUST identify it by `uri`, so a client can join content to
+  index.
+
+A reference value V resolves iff some index entry E has `E.uri == V`
+(satisfying `E.kinds`), or some entry E has `children` and
+`V == E.uri + "/" + id` for an id in `E.children.ids` (satisfying
+`E.children.kinds`).
+
+Resources are read-only; there is no write method (§7.6). No pagination is
+defined in v0.3; a resource whose index would be impractically large (a
+1536-well plate is ~9 KB of ids and is fine; a plate hotel of thousands of
+positions may not be) is a known open problem recorded in §15.2.
+
+### 10.3 Revisions
+
+`revision` is an opaque string that MUST change whenever a read of the
+resource would return different `index` or `content`, and MUST NOT be
+interpreted by clients beyond equality. RECOMMENDED construction is a
+per-process nonce plus a counter; the reference implementation derives it
+as a truncated hash of the canonicalized read result, which makes "the
+driver forgot to bump it" impossible. Reference validation (§10.4) never
+consults a revision, so a defective revision can at worst cost a missed
+notification or a spurious `-32012`, never a wrong validation.
+
+**Change notification** reuses the event channel (§11) under the reserved
+name `resource/changed`, with `data: {uri, revision}`. Delivery is
+best-effort exactly as §11 specifies; the revision in the payload lets a
+client discard stale notifications. There is no per-resource subscription:
+events are already broadcast to every operational session, and a second
+push model for a handful of resources is surface without power. Because
+events are written into active run records (§11), a signed manifest's
+event stream also witnesses every deck change during the run.
+
+### 10.4 Reference validation at submission
+
+For each string location in the validated `params` whose schema node
+carries `resource_ref` (including inside arrays), the server MUST resolve
+the value against a **fresh** read of the declared `enumerated_by`
+resource, per §10.2, checking that the resolved entry satisfies
+`resource_ref.kind`. On the first failure the server MUST reject the
+submission with `-32010` (`unknown_reference`), `retryable: false`, and
+`data.details` carrying at minimum: `pointer` (an RFC 6901 pointer into
+`params`, so the second element of an array is nameable), `parameter`,
+`reference` (the offending value), `expected_kind`, `enumerated_by`, and
+a `reason` from: `malformed_uri`, `unknown_resource`, `no_such_item`,
+`kind_mismatch`. Servers SHOULD add `resolved_prefix` (the longest prefix
+that did resolve) with its `resolved_kinds`, an OPTIONAL `did_you_mean`
+list (capped, filtered by `expected_kind`), and `read`: a literal,
+ready-to-send `resource/read` request object, so "I do not know what to
+pass" becomes a call the agent can make without parsing prose.
+
+Validation MUST use current state, not a cache keyed by revision: a
+defective revision must not let a reference to moved labware pass. This
+check is time-of-check-to-time-of-use: labware can move between validation
+and execution, and v0.3 does not close that window (§14). `if_revision`
+narrows it (§10.5).
+
+### 10.5 Optimistic concurrency: if_revision
+
+A client that plans against a resource read MAY assert its plan is still
+valid by sending `if_revision` on `command/submit`: an object mapping each
+resource URI it planned against to the `revision` it read. For each entry,
+the server MUST compare against the resource's current revision and reject
+on the first mismatch with `-32012` (`stale_revision`), `retryable:
+false`, and `data.details` carrying `uri`, `submitted_revision`,
+`current_revision`, and a ready-to-send `read` object. No run is created,
+no confirmation is consumed, and no grant use is spent: staleness is
+checked before authorization precisely so a stale plan never costs an
+operator approval.
+
+`if_revision` is an envelope field, never part of the normalized
+parameters or the authorization digest (§8.2): an operator approves an
+action, not a snapshot, and re-reading the deck after approval does not
+invalidate a grant. A run's terminal status returns the new revisions
+(§8.2), so a single agent driving an instrument can maintain freshness
+without ever re-reading. What `if_revision` does not provide is a
+reservation: between the check and a concurrent client's next write there
+is no lock, and reservation leases remain future work (§14,
+[ROADMAP.md](../ROADMAP.md)).
+
+## 11. Events
 
 Events report discrete occurrences; telemetry reports sampled values. The
 server pushes `notifications/event`:
@@ -575,7 +927,7 @@ server pushes `notifications/event`:
 - `severity` (string, REQUIRED): `"info"`, `"warning"`, or `"alarm"`.
 - `data` (object, REQUIRED): event-specific payload; MAY be `{}`.
 
-Reserved event names in v0.2 (servers MUST use these names for these
+Reserved event names in v0.3 (servers MUST use these names for these
 meanings):
 
 | Name | Meaning | `data` |
@@ -584,18 +936,19 @@ meanings):
 | `interlock/tripped` | A declared interlock tripped | `{interlock}` (its declared name) |
 | `interlock/cleared` | A tripped interlock cleared | `{interlock}` |
 | `measurement/stable` | A measurement reached stability (e.g. a balance settling) | `{channel, value}` |
-| `error/occurred` | An error not attributable to one run | Error object (§11.2) |
+| `error/occurred` | An error not attributable to one run | Error object (§12.2) |
+| `resource/changed` | A resource's content or index changed (§10.3) | `{uri, revision}` |
 
 Other event names are instrument-defined; vendor extensions MUST use the
 `x-<vendor>/` prefix (§7.5). Servers whose `events` capability is `true`
 MUST deliver every event to every operational session; there is no event
-subscription in v0.2. Events MUST be delivered to a session in emission
+subscription in v0.3. Events MUST be delivered to a session in emission
 order; delivery is best-effort, but events of severity `alarm` SHOULD NOT
 be dropped.
 
-## 11. Error Taxonomy
+## 12. Error Taxonomy
 
-### 11.1 Codes
+### 12.1 Codes
 
 Standard JSON-RPC codes apply to protocol-level failures: `-32700` (parse
 error), `-32600` (invalid request), `-32601` (method not found), `-32602`
@@ -615,7 +968,10 @@ Labwire domain errors use the JSON-RPC server-error range:
 | -32006 | `canceled` | The run was canceled | no |
 | -32007 | `not_cancelable` | Cancel requested for a run that cannot be canceled | no |
 | -32008 | `internal` | Unexpected server error | no |
-| -32009 | `confirmation_required` | An `S2`/`S3` command was submitted without an acceptable `confirmation` (§8.6) | no |
+| -32009 | `confirmation_required` | An `S2` command was submitted without an acceptable `confirmation` (§8.6) | no |
+| -32010 | `unknown_reference` | A `resource_ref` parameter value, or a `resource/read` URI, does not resolve in current resource state (§10.4) | no |
+| -32011 | `authorization_required` | An `S3` command was submitted without a verifiable operator grant for these exact parameters (§8.6) | no |
+| -32012 | `stale_revision` | An `if_revision` precondition did not match the resource's current revision (§10.5) | no |
 
 The "Retryable" column is the REQUIRED default for the `retryable` field;
 servers MAY override it per error instance (e.g. a transient
@@ -624,18 +980,26 @@ servers MAY override it per error instance (e.g. a transient
 When multiple rejection rules apply to one request, precedence is:
 not-initialized (`-32002`) → method not found (`-32601`) → invalid method
 params (`-32602`) → `unsupported` (`-32001`) → `validation` (`-32000`) →
-`confirmation_required` (`-32009`) → `interlock` (`-32003`) → capacity
-`busy` (`-32002`). Validation precedes confirmation so that an agent is
-never asked to confirm a request that could never run.
+`unknown_reference` (`-32010`) → `stale_revision` (`-32012`) →
+`interlock` (`-32003`) → capacity `busy` (`-32002`) →
+`confirmation_required` (`-32009`) / `authorization_required` (`-32011`).
 
-### 11.2 Error object
+This order applies one principle consistently: **everything knowable
+without an operator is checked first**, so an agent is never asked to
+confirm, and a single-use grant is never spent, on a call that could not
+have run. It moves `interlock` and capacity ahead of confirmation
+relative to v0.2, which had already stated the principle for validation.
+The reordering cannot deadlock recovery: interlock-clearing commands are
+`S0` and exempt from the interlock check (§8.5).
+
+### 12.2 Error object
 
 Everywhere an error appears, JSON-RPC `error` member, or CommandStatus
 `error` field: it is:
 
 - `code` (integer, REQUIRED)
 - `message` (string, REQUIRED): human-readable, one line.
-- `data` (object, REQUIRED for codes -32000..-32009):
+- `data` (object, REQUIRED for codes -32000..-32012):
   - `category` (string, REQUIRED): from the table above.
   - `retryable` (boolean, REQUIRED): whether the same request MAY succeed if
     retried without operator intervention. Agents SHOULD key retry policy off
@@ -646,7 +1010,7 @@ Everywhere an error appears, JSON-RPC `error` member, or CommandStatus
 Servers MUST NOT leak stack traces or internal paths in `message` or
 `details`.
 
-## 12. Signed Run Manifests
+## 13. Signed Run Manifests
 
 Every run that reaches a terminal state SHOULD produce a **run manifest**:
 a portable, verifiable record of what instrument did what, with which
@@ -655,21 +1019,21 @@ attributable and tamper-evident.
 
 Servers advertising the `manifests` capability (§6.1) MUST produce a
 manifest for every terminal run. **How manifests are surfaced to consumers
-is implementation-defined in v0.2**: no protocol method carries manifests;
+is implementation-defined in v0.3**: no protocol method carries manifests;
 the reference implementation writes a bundle (manifest + record stream) per
 run to a local directory. A future protocol version may add a retrieval
 method.
 
 > **Conformance note:** the manifest format is normative; the reference
-> implementation produces and verifies these bundles (§14.2).
+> implementation produces and verifies these bundles (§15.2).
 
-### 12.1 Manifest document
+### 13.1 Manifest document
 
 ```json
 <!-- example: manifest/document -->
 {
-  "manifest_version": "0.2",
-  "protocol_version": "0.2",
+  "manifest_version": "0.3",
+  "protocol_version": "0.3",
   "run_id": "b7e0a1c2-4d5e-4f60-8a9b-0c1d2e3f4a5b",
   "instrument": {
     "manufacturer": "Labwire Project",
@@ -681,7 +1045,8 @@ method.
   "command": {
     "name": "measure",
     "params": { "settle_timeout_s": 30.0 },
-    "safety_class": "S1"
+    "safety_class": "S1",
+    "params_digest": "sha256:b8a66f00ce786f5fb861ea0d72562e611c8a0332c7ee5adc2dc88a4a2b527561"
   },
   "status": "succeeded",
   "result": { "mass_g": 12.3456 },
@@ -704,24 +1069,49 @@ method.
 ```
 
 (`digest` is illustrative; `key_id` is the genuine SHA-256 of the example
-`public_key`.)
+`public_key`, and `params_digest` is the genuine digest of the example
+`params` per §8.6.)
 
 All fields are REQUIRED unless marked otherwise:
 
-- `manifest_version` (string): `"0.2"` for this document.
+- `manifest_version` (string): `"0.3"` for this document. Verifiers MUST
+  also accept `"0.2"` bundles, which lack the members introduced below;
+  the format change breaks producers, not verifiers.
 - `protocol_version` (string): the negotiated protocol version (§4).
 - `run_id` (string): the run's `command_id`.
 - `instrument` (object): the `identity` object from the descriptor (§7.1),
   verbatim.
-- `command` (object): `name` (string), `params` (object): the submitted
-  command verbatim, and `safety_class` (string): the class the server
-  enforced for it (§8.6). All three are covered by the signature, so a
-  manifest records what safety posture applied to the run.
+- `command` (object): `name` (string), `params` (object): the
+  **normalized** parameters of §8.2, with schema defaults applied, which
+  are also the digest input, and `safety_class` (string): the class the
+  server enforced for it (§8.6). In v0.2 `params` recorded the raw
+  submission, so a command with defaulted optionals signed a manifest
+  describing something other than what ran; recording the normalized
+  object closes that, and lets an auditor recompute `params_digest`
+  offline from the bundle alone. `params_digest` (string): the digest of
+  §8.6, present for every run in a 0.3 manifest. All are covered by the
+  signature, so a manifest records what safety posture applied to the run.
+- `authorization` (object, present iff the command's class is `S2` or
+  `S3`): how the run was authorized. For `S2`:
+  `{"mode": "confirmation", "identity_verified": false}`. For `S3`:
+  `mode` is `"grant"`, with `request_id` (string, OPTIONAL), an
+  `expires_at` and `use_index` describing the grant use, free-text
+  `issued_by` and `note` copied from the store **and labelled by this
+  specification as unauthenticated**, `grant_digest` (string):
+  `"sha256:"` + hex SHA-256 of the grant id, and `identity_verified`
+  (boolean, REQUIRED): MUST be `false` in v0.3. The grant id itself MUST
+  NOT appear: it is a bearer value and a signed bundle is a durable
+  artifact. `identity_verified` exists so the honesty caveat of §8.6 is a
+  machine-checkable wire fact rather than prose: verifiers MUST surface
+  it, and a future version with cryptographic operator identity flips it.
+- `resource_revisions` (array, OPTIONAL): for each resource the run
+  changed, `{uri, revision_at_start, revision_at_end}`, so an auditor can
+  ask whether state moved under the run.
 - `status` (string): the run's terminal state (§8.1).
 - `result` (any, present iff `status` is `succeeded` and the command
   returned a value): the command's result, verbatim.
 - `error` (object, present iff `status` is `failed`): the Error object
-  (§11.2).
+  (§12.2).
 - `data` (object):
   - `digest_alg` (string): `"sha256"`, the only permitted v0.2 value.
   - `digest` (string): lowercase hex SHA-256 of the run's **record
@@ -743,7 +1133,7 @@ the server's emission order, of:
 
 - for each sample produced on a channel listed in `data.channels` with
   timestamp in [`timestamps.started`, `timestamps.completed`]: the JCS
-  canonicalization (§12.2) of
+  canonicalization (§13.2) of
   `{"type": "sample", "channel": ..., "seq": ..., "timestamp": ..., "value": ...}`;
 - for each event emitted in that window: the JCS canonicalization of
   `{"type": "event", "name": ..., "timestamp": ..., "severity": ..., "data": ...}`;
@@ -754,7 +1144,7 @@ notifications. An empty record stream digests to the SHA-256 of zero bytes
 (`e3b0c442…b855`). Bundles SHOULD include the record stream itself so
 verifiers can recompute `digest`.
 
-### 12.2 Canonicalization and signature
+### 13.2 Canonicalization and signature
 
 The signature is computed as:
 
@@ -769,39 +1159,56 @@ Verification: remove `signature`, canonicalize per JCS, verify against
 `signer.public_key`, and check `signer.key_id` matches that key. Verifiers
 MUST reject a bundle whose `key_id` does not match its `public_key`.
 
-### 12.3 Keys
+### 13.3 Keys
 
 How a verifier comes to trust a public key is out of scope for v0.2. Servers
 SHOULD generate a keypair on first run and persist it; operators SHOULD
 record the `key_id` out of band (trust-on-first-use). This is stated plainly:
 v0.2 manifests prove *integrity* (the record wasn't altered) and *key
 continuity* (same signer as before), not *identity* (who the signer is). See
-§13.
+§14.
 
-## 13. Security Considerations
+## 14. Security Considerations
 
-v0.2 is designed for **trusted environments**: localhost or an isolated lab
+v0.3 is designed for **trusted environments**: localhost or an isolated lab
 network. Stated plainly:
 
 - **Authentication is a stub.** The client MAY present `api_key` in
   `initialize` (§6.1); a server configured with a key MUST reject
   initialization on mismatch with error `-32000` (`validation`). There is no
   authorization model, no user identity, and no key rotation in v0.2.
-- **Safety confirmation proves policy, not identity.** The `confirmation`
-  value that gates `S2`/`S3` commands (§8.6) shows that whoever holds the
-  deployment's token permitted this class of action. It does **not** identify
-  an operator, bind them to a specific task, or produce an audit trail.
-  Cryptographic operator binding: an operator token signed over the task and
-  the hash of its canonical parameters, as LAP specifies
-  ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)): is the intended
-  successor and is tracked in [ROADMAP.md](../ROADMAP.md). Until then,
-  deployments MUST NOT rely on `confirmation` as an accountability control.
+- **Authorization proves policy and binding, not identity.** An `S2`
+  `confirmation` shows that whoever holds the deployment's token permitted
+  this class of action. An `S3` grant (§8.6) proves more: someone with
+  write access to the server's grant store approved this command with
+  these exact parameter values, within a window and a use limit. Neither
+  identifies *who*. A grant id is a bearer value on a transport that only
+  SHOULD use TLS, replayable within its window by anyone who can read the
+  traffic; single use and short expiry bound the damage, and the manifest
+  records only its digest. On a single machine, an operator console and an
+  agent running as the same user are not separated by anything this
+  protocol can enforce; the grant store's write permissions are the actual
+  boundary, and deployments where it matters put the store where the agent
+  cannot write. Cryptographic operator identity: a JWS operator token
+  signed over the task and the hash of its canonical parameters, as LAP
+  specifies ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)): is the
+  intended successor and is tracked in [ROADMAP.md](../ROADMAP.md). Until
+  then, deployments MUST NOT rely on `confirmation` or grants as an
+  accountability control over identity; `identity_verified: false` in
+  every v0.3 manifest (§13.1) states this on the wire.
   <!-- TODO-VERIFY: settle on JWS profile + key distribution before
   implementing operator binding. -->
+- **Reference validation is time-of-check-to-time-of-use.** A reference
+  resolves at submission against state that can change before or during
+  execution, and v0.3 provides no lock. `if_revision` (§10.5) narrows the
+  window and never closes it; reservation leases are future work. v0.3
+  ships **no lost-update protection**: two clients interleaving on one
+  instrument can invalidate each other's plans without either seeing an
+  error, unless both use `if_revision` and re-read on `-32012`.
 - **Transport security.** Deployments that cross any network boundary SHOULD
   use `wss://` (TLS). The protocol itself provides no confidentiality.
 - **Manifest guarantees** are limited to integrity and key continuity
-  (§12.3). A manifest does not prove the physical sample, the operator, or
+  (§13.3). A manifest does not prove the physical sample, the operator, or
   the calibration state.
 - **Agent-facing strings are untrusted input.** Descriptor fields
   (`title`, `description`, event payloads, error messages) flow into AI agent
@@ -814,21 +1221,21 @@ network. Stated plainly:
   constrains the protocol (§8.5); a malicious server can lie about it.
   Physical safety MUST be enforced in the instrument, not in this protocol.
 
-## 14. Conformance
+## 15. Conformance
 
-### 14.1 Conformance levels
+### 15.1 Conformance levels
 
 | Level | Requirements |
 |---|---|
-| **Core** | One transport (§5); `initialize`, `ping`, `notifications/initialized` (§6); `instrument/describe` (§7); command lifecycle with push status and polling (§8); error taxonomy (§11) |
-| **Streaming** | Core + telemetry (§9) + events (§10) |
-| **Signed** | Streaming + run manifests (§12) |
+| **Core** | One transport (§5); `initialize`, `ping`, `notifications/initialized` (§6); `instrument/describe` (§7); command lifecycle with push status and polling (§8); error taxonomy (§12) |
+| **Streaming** | Core + telemetry (§9) + events (§11) |
+| **Signed** | Streaming + run manifests (§13) |
 
 A server MUST document its level. A client MUST tolerate a server of any
 level (the capability flags in the `initialize` *result* tell it what to
 expect).
 
-### 14.2 Reference implementation status (v0.2)
+### 15.2 Reference implementation status (v0.3)
 
 Honesty table, what the reference implementation in this repository
 implements:
@@ -837,18 +1244,22 @@ implements:
 |---|---|
 | §5.1 WebSocket transport | Implemented |
 | §5.2 stdio transport | **Specified only**: no consumer yet; implementation unscheduled |
-| §6 session lifecycle, §7 discovery, §8 commands, §9 telemetry, §10 events, §11 errors | Implemented |
+| §6 session lifecycle, §7 discovery, §8 commands, §9 telemetry, §11 events, §12 errors | Implemented |
 | §7.2/§7.3 mandatory UCUM codes | Implemented, presence enforced at declaration and on the wire; UCUM **grammar** not parsed |
 | §7.2 `qudt_quantity_kind` | Implemented as a pass-through declaration; no QUDT reasoning |
-| §8.6 safety classes | Implemented, `S2`/`S3` confirmation enforced with a configured-token stub |
-| §8.6 operator-bound confirmation | **Not implemented**: see §13 and ROADMAP.md |
-| §12 signed manifests | Implemented: bundle = `manifest.json` + `records.jsonl`, verified by `labwire verify` |
-| §13 `api_key` stub | **Deferred, unscheduled** |
+| §7.2 typed references (`resource_ref`) | Implemented: shape at declaration, closure at server construction, resolution at submission |
+| §7.6/§10 resources | Implemented: declaration, `resource/read`, derived revisions, `resource/changed`. **No pagination**; a very large index is an open problem. **No caching**: every reference validation re-reads |
+| §8.6 `S2` confirmation | Implemented with a configured-token stub |
+| §8.6 `S3` operator grants | Implemented: file-backed store, pending requests, atomic use counts, `labwire grant`. **Assumes the store lives where the agent cannot write; nothing in-protocol enforces that** |
+| §8.6 cryptographic operator identity | **Not implemented**: `identity_verified` is `false` in every manifest; see §14 and ROADMAP.md |
+| §10.5 `if_revision` | Implemented. **No reservation, no lost-update protection beyond it** |
+| §13 signed manifests | Implemented: bundle = `manifest.json` + `records.jsonl`, verified by `labwire verify`; 0.2 and 0.3 bundles both verify |
+| §14 `api_key` stub | **Deferred, unscheduled** |
 | In-memory transport (test-only; not a §5 transport) | Implemented |
 
 This table is updated with each release.
 
-## 15. JSON Message Reference
+## 16. JSON Message Reference
 
 Every protocol message, one example each. Examples are normative for shape.
 
@@ -857,7 +1268,7 @@ Marker grammar: the first line *inside* each fenced JSON block is
 or one of the literals `error` and `manifest`, and `<kind>` is one of
 `request`, `result`, `notification`, `notification-terminal`, `response`,
 `document`, `signature-excerpt`. The reference implementation's test suite
-extracts every marked block in this document (including §12.1), strips the
+extracts every marked block in this document (including §13.1), strips the
 marker line, and round-trips the JSON through the message model registered
 for `<name>`: failing if any example does not round-trip. Blocks whose kind
 is `signature-excerpt` are validated only for the fields present.
@@ -866,7 +1277,7 @@ Examples are independent snapshots, not one session timeline; `id`,
 `command_id`, and hash/signature values are illustrative unless stated
 otherwise.
 
-### 15.1 initialize
+### 16.1 initialize
 
 ```json
 <!-- example: initialize/request -->
@@ -895,7 +1306,7 @@ otherwise.
 }
 ```
 
-### 15.2 notifications/initialized
+### 16.2 notifications/initialized
 
 ```json
 <!-- example: notifications/initialized/notification -->
@@ -906,7 +1317,7 @@ otherwise.
 }
 ```
 
-### 15.3 ping
+### 16.3 ping
 
 ```json
 <!-- example: ping/request -->
@@ -918,7 +1329,7 @@ otherwise.
 { "jsonrpc": "2.0", "id": 2, "result": {} }
 ```
 
-### 15.4 instrument/describe
+### 16.4 instrument/describe
 
 ```json
 <!-- example: instrument/describe/request -->
@@ -998,12 +1409,167 @@ otherwise.
         "tripped": false
       }
     ],
+    "resources": [
+      {
+        "uri": "labwire:syringe",
+        "kind": "consumable",
+        "title": "Installed syringe",
+        "description": "The syringe currently installed in the pump: its model, capacity, and how much it holds. Changes when a syringe is exchanged or the plunger moves.",
+        "item_kinds": [],
+        "revision": "b2c4e6a8-17",
+        "content_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["model", "capacity_ul", "installed_ul"],
+          "properties": {
+            "model": { "type": "string" },
+            "capacity_ul": { "type": "number", "unit": "uL" },
+            "barrel_diameter_mm": { "type": "number", "unit": "mm" },
+            "installed_ul": { "type": "number", "unit": "uL" }
+          }
+        }
+      }
+    ],
     "max_concurrent_commands": 1
   }
 }
 ```
 
-### 15.5 command/submit
+An instrument with tree-shaped state and typed references declares them
+together; a fragment of a liquid handler's descriptor:
+
+```json
+<!-- example: instrument/describe/result -->
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "identity": {
+      "manufacturer": "PyLabRobot bridge (Labwire)",
+      "model": "LiquidHandlerChatterboxBackend",
+      "serial_number": "dilution-rig",
+      "firmware_version": "0.3.0"
+    },
+    "commands": [
+      {
+        "name": "transfer",
+        "title": "Transfer",
+        "description": "Move liquid from one container into one or more others, aspirating and dispensing in one command.",
+        "params_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "targets", "volumes_ul"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "resource_ref": { "kind": "container", "enumerated_by": "labwire:deck" },
+              "description": "The container to draw from. Must be a container listed in the index of resource labwire:deck; read that resource for the valid values."
+            },
+            "targets": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "resource_ref": { "kind": "container", "enumerated_by": "labwire:deck" }
+              }
+            },
+            "volumes_ul": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          }
+        },
+        "unit_annotations": { "volumes_ul": "uL" },
+        "returns_units": { "total_volume_ul": "uL" },
+        "safety_class": "S2",
+        "interruptible": true
+      }
+    ],
+    "channels": [],
+    "interlocks": [],
+    "resources": [
+      {
+        "uri": "labwire:deck",
+        "kind": "deck",
+        "title": "Deck",
+        "description": "What is on the deck right now. Every container, tip site, labware and site a command parameter can name is listed in this resource's index. Changes whenever labware or liquid moves.",
+        "item_kinds": ["labware", "plate", "tip_rack", "container", "tip_site", "site", "trash"],
+        "revision": "9f3c1a4e-131",
+        "content_schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["contents"],
+          "properties": {
+            "contents": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["uri", "volume_ul"],
+                "properties": {
+                  "uri": { "type": "string" },
+                  "volume_ul": { "type": "number", "unit": "uL" },
+                  "max_volume_ul": { "type": ["number", "null"], "unit": "uL" }
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "max_concurrent_commands": 1
+  }
+}
+```
+
+### 16.5 resource/read
+
+```json
+<!-- example: resource/read/request -->
+{ "jsonrpc": "2.0", "id": 10, "method": "resource/read", "params": { "uri": "labwire:deck" } }
+```
+
+```json
+<!-- example: resource/read/result -->
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "result": {
+    "uri": "labwire:deck",
+    "kind": "deck",
+    "revision": "9f3c1a4e-131",
+    "read_at": "2026-07-27T09:14:02.115430Z",
+    "index_complete": true,
+    "index": [
+      {
+        "uri": "labwire:deck/tips",
+        "kinds": ["tip_rack", "labware"],
+        "title": "tips",
+        "children": { "kinds": ["tip_site"], "ids": ["A1", "B1", "C1", "D1"] }
+      },
+      {
+        "uri": "labwire:deck/source_plate",
+        "kinds": ["plate", "labware"],
+        "title": "source_plate",
+        "children": { "kinds": ["container"], "ids": ["A1", "A2", "B1", "B2"] }
+      },
+      { "uri": "labwire:deck/staging-0", "kinds": ["site"], "title": "staging-0" },
+      { "uri": "labwire:deck/trash", "kinds": ["trash", "labware"], "title": "trash" }
+    ],
+    "content": {
+      "contents": [
+        { "uri": "labwire:deck/source_plate/A1", "volume_ul": 300.0, "max_volume_ul": 360.0 }
+      ]
+    }
+  }
+}
+```
+
+(`ids` arrays abbreviated; a real 96-well plate lists 96 two-character ids,
+about 600 bytes.)
+
+### 16.6 command/submit
 
 ```json
 <!-- example: command/submit/request -->
@@ -1023,6 +1589,29 @@ otherwise.
 required; submitting the same request without it is rejected with `-32009`
 (`confirmation_required`). An `S0` or `S1` command needs no such field.
 
+An `S3` command takes an operator grant instead, and MAY carry
+`if_revision` asserting the resource state the plan was made against
+(§10.5). Note the reference-valued parameters and that no `confirmation`
+appears: one would not satisfy `S3`.
+
+```json
+<!-- example: command/submit/request -->
+{
+  "jsonrpc": "2.0",
+  "id": 18,
+  "method": "command/submit",
+  "params": {
+    "command": "move_plate",
+    "params": {
+      "plate": "labwire:deck/dilution_plate",
+      "to": "labwire:deck/staging-0"
+    },
+    "authorization": { "grant_id": "g-7f2a91c4" },
+    "if_revision": { "labwire:deck": "9f3c1a4e-131" }
+  }
+}
+```
+
 ```json
 <!-- example: command/submit/result -->
 {
@@ -1035,7 +1624,7 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.6 notifications/command_status
+### 16.7 notifications/command_status
 
 ```json
 <!-- example: notifications/command_status/notification -->
@@ -1058,12 +1647,15 @@ required; submitting the same request without it is rejected with `-32009`
   "params": {
     "command_id": "5f0c2f0a-7c1e-4d0b-9a63-2f3a1c8d9e4b",
     "status": "succeeded",
-    "result": { "dispensed_ul": 500.0 }
+    "result": { "dispensed_ul": 500.0 },
+    "resource_revisions": [
+      { "uri": "labwire:syringe", "revision": "b2c4e6a8-18" }
+    ]
   }
 }
 ```
 
-### 15.7 command/status
+### 16.8 command/status
 
 ```json
 <!-- example: command/status/request -->
@@ -1088,7 +1680,7 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.8 command/cancel
+### 16.9 command/cancel
 
 ```json
 <!-- example: command/cancel/request -->
@@ -1112,7 +1704,7 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.9 telemetry/subscribe
+### 16.10 telemetry/subscribe
 
 ```json
 <!-- example: telemetry/subscribe/request -->
@@ -1133,7 +1725,7 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.10 telemetry/unsubscribe
+### 16.11 telemetry/unsubscribe
 
 ```json
 <!-- example: telemetry/unsubscribe/request -->
@@ -1150,7 +1742,7 @@ required; submitting the same request without it is rejected with `-32009`
 { "jsonrpc": "2.0", "id": 8, "result": {} }
 ```
 
-### 15.11 notifications/telemetry
+### 16.12 notifications/telemetry
 
 ```json
 <!-- example: notifications/telemetry/notification -->
@@ -1167,7 +1759,7 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.12 notifications/event
+### 16.13 notifications/event
 
 ```json
 <!-- example: notifications/event/notification -->
@@ -1183,7 +1775,23 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.13 Error response
+A resource change rides the same channel under its reserved name (§10.3):
+
+```json
+<!-- example: notifications/event/notification -->
+{
+  "jsonrpc": "2.0",
+  "method": "notifications/event",
+  "params": {
+    "name": "resource/changed",
+    "timestamp": "2026-07-27T09:14:07.884120Z",
+    "severity": "info",
+    "data": { "uri": "labwire:deck", "revision": "9f3c1a4e-142" }
+  }
+}
+```
+
+### 16.14 Error response
 
 ```json
 <!-- example: error/response -->
@@ -1198,9 +1806,95 @@ required; submitting the same request without it is rejected with `-32009`
 }
 ```
 
-### 15.14 Signed manifest bundle
+A failed reference resolution names the failure precisely and hands the
+agent the read that recovers (§10.4):
 
-The manifest document example appears in §12.1. The signed bundle adds the
+```json
+<!-- example: error/response -->
+{
+  "jsonrpc": "2.0",
+  "id": 12,
+  "error": {
+    "code": -32010,
+    "message": "parameter /targets/1: 'labwire:deck/source_plate/A13' is not a container on this instrument",
+    "data": {
+      "category": "unknown_reference",
+      "retryable": false,
+      "details": {
+        "pointer": "/targets/1",
+        "parameter": "targets",
+        "reference": "labwire:deck/source_plate/A13",
+        "expected_kind": "container",
+        "enumerated_by": "labwire:deck",
+        "resolved_prefix": "labwire:deck/source_plate",
+        "resolved_kinds": ["plate", "labware"],
+        "reason": "no_such_item",
+        "did_you_mean": ["labwire:deck/source_plate/A1", "labwire:deck/source_plate/B1"],
+        "read": { "method": "resource/read", "params": { "uri": "labwire:deck" } }
+      }
+    }
+  }
+}
+```
+
+A refused `S3` submission records a pending request and tells the agent,
+in a typed field, that it cannot mint what is missing (§8.6):
+
+```json
+<!-- example: error/response -->
+{
+  "jsonrpc": "2.0",
+  "id": 19,
+  "error": {
+    "code": -32011,
+    "message": "move_plate is S3 and requires an operator grant bound to these exact parameters; a confirmation string cannot authorize it",
+    "data": {
+      "category": "authorization_required",
+      "retryable": false,
+      "details": {
+        "safety_class": "S3",
+        "command": "move_plate",
+        "reason": "absent",
+        "request_id": "req-3f1c8d9e",
+        "params_digest": "sha256:1c8d4fbb2e7a0f5d9c3b81a6e04f2d7c5b9e13a80f6c24d7e9b1a3c5f7d0e2b4",
+        "digest_alg": "sha256",
+        "canonicalization": "RFC8785",
+        "mintable_by_agent": false,
+        "operator_instruction": "On the instrument host run: labwire grant list, then labwire grant approve req-3f1c8d9e --ttl 15m --uses 1"
+      }
+    }
+  }
+}
+```
+
+A stale plan is refused before any confirmation or grant is spent
+(§10.5):
+
+```json
+<!-- example: error/response -->
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "error": {
+    "code": -32012,
+    "message": "labwire:deck has moved since this plan was made",
+    "data": {
+      "category": "stale_revision",
+      "retryable": false,
+      "details": {
+        "uri": "labwire:deck",
+        "submitted_revision": "9f3c1a4e-131",
+        "current_revision": "9f3c1a4e-142",
+        "read": { "method": "resource/read", "params": { "uri": "labwire:deck" } }
+      }
+    }
+  }
+}
+```
+
+### 16.15 Signed manifest bundle
+
+The manifest document example appears in §13.1. The signed bundle adds the
 `signature` field:
 
 ```json
@@ -1211,10 +1905,10 @@ The manifest document example appears in §12.1. The signed bundle adds the
 }
 ```
 
-(All other manifest fields as §12.1; abbreviated here for length. The
+(All other manifest fields as §13.1; abbreviated here for length. The
 `signature` value is illustrative, not a real signature over this example.)
 
-## 16. Acknowledgments
+## 17. Acknowledgments
 
 Labwire borrows deliberately from prior art, with gratitude:
 
@@ -1232,16 +1926,60 @@ Labwire borrows deliberately from prior art, with gratitude:
   <!-- TODO-VERIFY: confirm LADS's device state-machine/interlock
   vocabulary against the published companion specification -->
 - **LAP** ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)): the
-  mandatory-UCUM discipline for every quantity (§7.2, §7.3) and the S0-S3
+  mandatory-UCUM discipline for every quantity (§7.2, §7.3), the S0-S3
   safety-class taxonomy with confirmation for costly and hazardous actions
-  (§8.6). Labwire and LAP are independent, convergent designs; these two
-  ideas are adopted from LAP with thanks.
+  (§8.6), and the binding of an operator authorization to a capability and
+  to a digest of its canonical parameters (§8.6). LAP binds a JWS operator
+  token; v0.3 keeps the binding and defers the signature. Labwire and LAP
+  are independent, convergent designs; these ideas are adopted from LAP
+  with thanks, and no compatibility or endorsement is claimed.
+- **W3C Web of Things Thing Description:** the placement of semantics
+  inside an interaction affordance's data schema rather than in a side
+  table, which decided `resource_ref` and the content-schema `unit`
+  keyword (§7.2, §7.6), and the `unit` term itself.
+  <!-- TODO-VERIFY: the exact member name and section in WoT Thing
+  Description 1.1 before citing it more precisely. -->
+- **JSON-LD:** the intuition that a value can be a typed link to a named
+  node rather than a literal. Labwire v0.3 is **not** JSON-LD: there is no
+  `@context`, `labwire:` URIs are not IRIs into a shared vocabulary, and
+  `kind` is matched within one instrument against Appendix A alone. The
+  intuition is borrowed; the machinery is deliberately not.
+- **MCP resources:** the resource primitive itself, reduced to one read
+  method and in-descriptor declaration (§10).
+- **HTTP (RFC 9110):** conditional-request thinking behind `revision`,
+  `if_revision`, and terminal-status revision reporting (§10.3, §10.5).
+- **RFC 3986 / RFC 6901 / RFC 8785:** the URI shape, the error pointer
+  form, and the canonicalization under every digest.
 
 A detailed, honest comparison, including what these systems do better than
 Labwire, lives in `PRIOR_ART.md` at the repository root.
 
-## 17. Changelog
+## 18. Changelog
 
+- **0.3.0 (2026-07-27):** Protocol version `"0.3"`. Things, not only
+  quantities. **Added:** resources: URI-identified, typed, readable
+  instrument state declared in the descriptor (§7.6) and read with
+  `resource/read` (§10), with derived revisions and the reserved
+  `resource/changed` event; typed references: the `resource_ref` schema
+  keyword, validated against current resource state at submission with the
+  new error `-32010` (`unknown_reference`); operator grants for `S3`:
+  out-of-band provisioned, bound to a command and the RFC 8785 digest of
+  its normalized parameters (a binding adopted from LAP with credit),
+  expiring and use-limited, refused with the new error `-32011`
+  (`authorization_required`); optimistic concurrency: `if_revision` on
+  submit with the new error `-32012` (`stale_revision`), and
+  `resource_revisions` on terminal status. **Breaking:**
+  `InstrumentDescriptor.resources` is REQUIRED; a `confirmation` no longer
+  satisfies `S3`; submission precedence moves `interlock` and capacity
+  ahead of confirmation and authorization (§12.1); the error `data`
+  requirement extends to `-32012`; manifests are `"0.3"` with
+  `command.params` now the **normalized** parameters (in v0.2 a command
+  with defaulted optionals signed a manifest describing something other
+  than what ran), plus `params_digest`, `authorization` with a REQUIRED
+  `identity_verified: false`, and `resource_revisions`; the `unit` and
+  `resource_ref` schema keywords are claimed, `unit` REQUIRED on numeric
+  nodes in `content_schema` and forbidden in command schemas. Verifiers
+  accept both `"0.2"` and `"0.3"` bundles.
 - **0.2.1 (2026-07-27):** Corrective. The unit rule in §7.2 said "every
   numeric parameter (JSON Schema type `number` or `integer`)", which a
   reference implementation read literally, so an array of numbers carried no
@@ -1260,11 +1998,44 @@ Labwire, lives in `PRIOR_ART.md` at the repository root.
   **Added:** per-command `safety_class` (`S0`-`S3`, default `S1`, §8.6) with
   mandatory `confirmation` on `S2`/`S3` submissions and the new error
   `-32009` (`confirmation_required`); optional `qudt_quantity_kind`
-  declarations; `command.safety_class` inside signed manifests (§12.1).
-  Units and the safety taxonomy are adopted from LAP with credit (§16).
+  declarations; `command.safety_class` inside signed manifests (§13.1).
+  Units and the safety taxonomy are adopted from LAP with credit (§17).
 - **0.1.0 (2026-07-23):** Initial draft. Protocol version `"0.1"`.
 
 ---
+
+## Appendix A. Kind registry
+
+`kind` names without a dot are reserved for this registry; anything else
+MUST take the form `<vendor>.<name>`, and clients MUST treat unrecognized
+vendor kinds as opaque. This registry works the way UCUM codes do: an
+instrument looks a name up, it does not invent one, because a kind two
+instruments spell differently is the fragmentation typed references exist
+to end.
+
+Stated honestly: this registry is seeded from the single domain that
+forced the feature (liquid handling) and is maintained by this project
+alone. It is expected to grow one proven need at a time, and a governance
+process is future work recorded in ROADMAP.md.
+
+| Kind | Meaning |
+|---|---|
+| `deck` | The working area of a liquid handler |
+| `labware` | Anything an instrument can hold or move |
+| `plate` | A multi-well plate (also `labware`) |
+| `tip_rack` | A rack of pipette tips (also `labware`) |
+| `trough` | A single-cavity reservoir (also `container`, `labware`) |
+| `trash` | A disposal target (also `labware`) |
+| `lid` | A plate lid (also `labware`) |
+| `container` | Holds liquid: a well, a tube, a trough cavity |
+| `tip_site` | One spot of a tip rack |
+| `site` | A position labware can stand on |
+| `consumable` | An installed consumable: a syringe, a cartridge |
+
+An index entry lists **every** kind it satisfies (§10.2), most specific
+first, so a trough entry reads `["trough", "container", "labware"]` and a
+reference declaring any of the three resolves to it. There is no subtyping
+graph in the protocol; the instrument declares the set.
 
 ### References
 

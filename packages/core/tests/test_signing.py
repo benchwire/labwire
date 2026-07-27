@@ -1,4 +1,4 @@
-"""Tests for ed25519 manifest signing and verification (SPEC §12)."""
+"""Tests for ed25519 manifest signing and verification (SPEC §13)."""
 
 import base64
 import hashlib

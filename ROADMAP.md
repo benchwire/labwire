@@ -7,13 +7,13 @@ with tests.
 
 Anything here that Labwire does not do today is stated as missing in
 [README.md](README.md), [PRIOR_ART.md](PRIOR_ART.md), or the specification's
-conformance table (SPEC §14.2) rather than implied to exist.
+conformance table (SPEC §15.2) rather than implied to exist.
 
 ## Safety and accountability
 
 - **Cryptographic operator binding for `S2`/`S3` commands.** Today's
   `confirmation` is a deployment token: it proves policy, not identity
-  (SPEC §13). The intended successor is an operator token signed over the
+  (SPEC §14). The intended successor is an operator token signed over the
   task and the hash of its canonical parameters, as
   [LAP](https://arxiv.org/abs/2606.03755) specifies. This is the single most
   important gap in the current safety story.

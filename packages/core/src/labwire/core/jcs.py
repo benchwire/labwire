@@ -1,4 +1,4 @@
-"""RFC 8785 (JCS) JSON canonicalization (SPEC §12.2).
+"""RFC 8785 (JCS) JSON canonicalization (SPEC §13.2).
 
 Vendored implementation (the algorithm is small and dependency-free): keys
 sort by code point, strings use minimal escaping with literal UTF-8, and

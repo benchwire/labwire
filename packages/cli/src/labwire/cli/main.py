@@ -29,7 +29,7 @@ def verify(bundle: Path) -> None:
 
     Checks the ed25519 signature over the JCS-canonicalized manifest, the
     signer key_id, and, when records.jsonl is present, recomputes the
-    record-stream digest (SPEC §12.2). Exits 0 when authentic, 1 otherwise.
+    record-stream digest (SPEC §13.2). Exits 0 when authentic, 1 otherwise.
     """
     outcome = verify_bundle(bundle)
     for warning in outcome.warnings:

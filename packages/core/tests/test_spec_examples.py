@@ -1,6 +1,6 @@
 """Round-trip every JSON example in spec/SPEC.md through the message models.
 
-SPEC §15: from milestone M2, every marked fenced JSON block must round-trip
+SPEC §16: from milestone M2, every marked fenced JSON block must round-trip
 through the model registered for its method. Manifest examples validate from
 M4 and are skipped here; ``signature-excerpt`` blocks are exempt.
 """
@@ -44,7 +44,7 @@ def test_spec_example_round_trips(marker: str, raw: dict[str, Any]) -> None:
     name, kind = _split(marker)
     if name == "manifest":
         if kind == "signature-excerpt":
-            # excerpt blocks are validated only for the fields present (SPEC §15)
+            # excerpt blocks are validated only for the fields present (SPEC §16)
             assert "signature" in raw
             assert set(raw) <= set(Manifest.model_fields), "unknown field in excerpt"
             return
@@ -76,4 +76,4 @@ def test_every_registry_method_has_at_least_one_example() -> None:
     exampled = {_split(marker)[0] for marker, _ in _examples()}
     missing = {m for m in MESSAGE_TYPES if m not in exampled}
     # notifications/command_status has two examples; every method needs >= 1
-    assert not missing, f"spec §15 lacks examples for: {sorted(missing)}"
+    assert not missing, f"spec §16 lacks examples for: {sorted(missing)}"

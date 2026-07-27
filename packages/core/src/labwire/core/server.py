@@ -325,7 +325,7 @@ class CommandContext:
     def emit_event(
         self, name: str, severity: EventSeverity = "info", data: dict[str, Any] | None = None
     ) -> None:
-        """Emit a protocol event to every operational session (SPEC §10)."""
+        """Emit a protocol event to every operational session (SPEC §11)."""
         self._emit_event(name, severity, data or {})
 
     def now(self) -> datetime:
@@ -547,7 +547,7 @@ def _canonical(record: dict[str, Any]) -> bytes:
 
 
 def _pydantic_error_details(exc: PydanticValidationError) -> list[dict[str, str]]:
-    # Structured, agent-actionable detail (SPEC §11.2): field, message, type.
+    # Structured, agent-actionable detail (SPEC §12.2): field, message, type.
     # Field names are not internal paths; tracebacks are never included.
     return [
         {
@@ -777,7 +777,7 @@ class InstrumentServer:
     def emit_event(
         self, name: str, severity: EventSeverity = "info", data: dict[str, Any] | None = None
     ) -> None:
-        """Emit a protocol event outside any command (SPEC §10).
+        """Emit a protocol event outside any command (SPEC §11).
 
         Example:
             >>> # server.emit_event("instrument/state_changed", "info", {"state": "idle"})
@@ -880,7 +880,7 @@ class InstrumentServer:
         return result.model_dump(mode="json")
 
     def _validate[M: BaseModel](self, model: type[M], params: dict[str, Any]) -> M:
-        # Method-shape params (SPEC §11.1: -32602); the command's own
+        # Method-shape params (SPEC §12.1: -32602); the command's own
         # params_schema violations are -32000 and handled in _submit.
         try:
             return model.model_validate(params)
@@ -896,7 +896,7 @@ class InstrumentServer:
         return [run for run in self._runs.values() if run.active]
 
     async def _submit(self, session: _ServerSession, params: dict[str, Any]) -> dict[str, Any]:
-        # Rejection precedence per SPEC §11.1: unsupported → validation →
+        # Rejection precedence per SPEC §12.1: unsupported → validation →
         # interlock → capacity busy.
         submit = self._validate(SubmitParams, params)
         meta = self.instrument.commands().get(submit.command)
@@ -951,7 +951,7 @@ class InstrumentServer:
 
         Deployment policy: with a token configured the value must match it;
         without one, any non-empty value is accepted. Either way this proves
-        deployment policy, not operator identity, see SPEC §13.
+        deployment policy, not operator identity, see SPEC §14.
         """
         if confirmation is None or not confirmation.strip():
             return False
@@ -1068,7 +1068,7 @@ class InstrumentServer:
         run.session.notify_soon("notifications/command_status", run.snapshot())
 
     def _get_run(self, params: dict[str, Any]) -> _Run:
-        # -32602 for a malformed/missing command_id (method shape, SPEC §11.1);
+        # -32602 for a malformed/missing command_id (method shape, SPEC §12.1);
         # -32000 for a well-formed but unknown one (unknown entity).
         parsed = self._validate(CommandIdParams, params)
         run = self._runs.get(parsed.command_id)

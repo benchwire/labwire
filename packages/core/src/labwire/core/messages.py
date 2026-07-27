@@ -1,4 +1,4 @@
-"""Protocol message params/result models and the method registry (SPEC §15).
+"""Protocol message params/result models and the method registry (SPEC §16).
 
 ``MESSAGE_TYPES`` maps every protocol method name to its params model and
 (for requests) result model. The registry is what validates SPEC.md's
@@ -45,6 +45,8 @@ class ServerCapabilities(_Msg):
     telemetry: bool = False
     events: bool = False
     manifests: bool = False
+    resources: bool = False
+    grants: bool = False
 
 
 class InitializeParams(_Msg):
@@ -72,12 +74,25 @@ class EmptyResult(_Msg):
     """Empty result object."""
 
 
+class Authorization(_Msg):
+    """An operator grant presented on an S3 submission (SPEC §8.6).
+
+    An object rather than a bare string so a future cryptographic scheme
+    can add members without changing the field's type.
+    """
+
+    grant_id: str
+
+
 class SubmitParams(_Msg):
     """Params of ``command/submit`` (SPEC §8.2)."""
 
     command: str
     params: dict[str, Any]
     confirmation: str | None = None
+    authorization: Authorization | None = None
+    if_revision: dict[str, str] | None = None
+    """Maps resource URI to the revision the client planned against (SPEC §10.5)."""
 
 
 class SubmitResult(_Msg):
@@ -94,6 +109,13 @@ class Progress(_Msg):
     message: str | None = None
 
 
+class ResourceRevision(_Msg):
+    """One resource's revision after a run changed it (SPEC §8.2)."""
+
+    uri: str
+    revision: str
+
+
 class CommandStatus(_Msg):
     """The CommandStatus object (SPEC §8.2): pushed and polled alike."""
 
@@ -102,6 +124,7 @@ class CommandStatus(_Msg):
     progress: Progress | None = None
     result: Any = None
     error: JsonRpcError | None = None
+    resource_revisions: list[ResourceRevision] | None = None
 
 
 class CommandIdParams(_Msg):
@@ -140,12 +163,53 @@ class TelemetryNotification(_Msg):
 
 
 class EventNotification(_Msg):
-    """Params of ``notifications/event`` (SPEC §10)."""
+    """Params of ``notifications/event`` (SPEC §11)."""
 
     name: str
     timestamp: str
     severity: EventSeverity
     data: dict[str, Any]
+
+
+class ResourceReadParams(_Msg):
+    """Params of ``resource/read`` (SPEC §10.2)."""
+
+    uri: str
+
+
+class ResourceIndexChildren(_Msg):
+    """The items of one index entry: ids composing ``<entry-uri>/<id>`` (SPEC §10.2)."""
+
+    kinds: list[str]
+    ids: list[str]
+
+
+class ResourceIndexEntry(_Msg):
+    """One entry of a resource's reference index (SPEC §10.2)."""
+
+    uri: str
+    kinds: list[str]
+    title: str | None = None
+    children: ResourceIndexChildren | None = None
+
+
+class ResourceReadResult(_Msg):
+    """Result of ``resource/read`` (SPEC §10.2)."""
+
+    uri: str
+    kind: str
+    revision: str
+    read_at: str
+    index_complete: bool
+    index: list[ResourceIndexEntry]
+    content: Any = None
+
+
+class ResourceChangedData(_Msg):
+    """``data`` of the reserved ``resource/changed`` event (SPEC §10.3)."""
+
+    uri: str
+    revision: str
 
 
 class MessageTypes(NamedTuple):
@@ -159,6 +223,7 @@ MESSAGE_TYPES: dict[str, MessageTypes] = {
     "initialize": MessageTypes(InitializeParams, InitializeResult),
     "ping": MessageTypes(EmptyParams, EmptyResult),
     "instrument/describe": MessageTypes(EmptyParams, InstrumentDescriptor),
+    "resource/read": MessageTypes(ResourceReadParams, ResourceReadResult),
     "command/submit": MessageTypes(SubmitParams, SubmitResult),
     "command/status": MessageTypes(CommandIdParams, CommandStatus),
     "command/cancel": MessageTypes(CommandIdParams, CommandStatus),
@@ -169,4 +234,4 @@ MESSAGE_TYPES: dict[str, MessageTypes] = {
     "notifications/telemetry": MessageTypes(TelemetryNotification, None),
     "notifications/event": MessageTypes(EventNotification, None),
 }
-"""Every protocol method (SPEC §15), for validation and schema export."""
+"""Every protocol method (SPEC §16), for validation and schema export."""
