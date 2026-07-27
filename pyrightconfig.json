@@ -113,6 +113,24 @@
       "reportIncompatibleMethodOverride": "none",
       "reportReturnType": "none",
       "reportUntypedBaseClass": "none"
+    },
+    {
+      "root": "examples/liquid_handling",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src",
+        "examples/liquid_handling"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none",
+      "reportArgumentType": "none"
     }
   ]
 }

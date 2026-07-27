@@ -1,0 +1,43 @@
+# Annotations for the dilution rig.
+#
+# Unlike the ophyd bridge's file, this one is optional: PyLabRobot is
+# consistent about units by convention, so the bridge supplies them from a
+# built-in table. What this file is for is the thing neither library knows,
+# which is what the labware actually holds.
+#
+# `labwire-pylabrobot check` reports what Labwire would expose from this.
+
+version: 1
+
+instrument:
+  description: >-
+    A Hamilton STARlet running a two-fold serial dilution, simulated end to
+    end by PyLabRobot's chatterbox backend. No hardware is involved.
+  intent_tags: [liquid_handling, dilution]
+
+commands:
+  # The chatterbox backend is instant; on a real STARlet a transfer is seconds.
+  transfer: {estimated_duration_s: 4.0}
+  aspirate: {estimated_duration_s: 2.0}
+  dispense: {estimated_duration_s: 2.0}
+
+labware:
+  Cor_96_wellplate_360ul_Fb:
+    description: Corning Costar 96-well flat-bottom plate, 360 uL per well.
+
+resources:
+  source_plate:
+    description: Holds the concentrated dye stock in A1.
+    hazard: none
+  dilution_plate:
+    description: Row A receives the two-fold dilution series.
+    hazard: none
+
+  # What a hazard annotation looks like in practice. Nothing on this deck is
+  # dangerous, so the example is commented out rather than faked:
+  #
+  # acid_stock:
+  #   description: 1 M hydrochloric acid.
+  #   hazard: corrosive
+  #   safety_class: S3   # reported and recorded; see SPEC-FINDINGS.md
+  #   locked: true       # refused outright, which v0.2 *can* enforce

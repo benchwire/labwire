@@ -67,3 +67,18 @@ def test_ophyd_claude_scan_degrades_gracefully_without_key(tmp_path: Path) -> No
     assert proc.returncode == 0, proc.stderr
     assert "ANTHROPIC_API_KEY not set" in proc.stdout
     assert "OK - authentic" in proc.stdout
+
+
+def test_pylabrobot_dilution_demo_runs_and_signs_it(tmp_path: Path) -> None:
+    proc = _run_demo("demo-pylabrobot", tmp_path, strip_key=False)
+    assert proc.returncode == 0, proc.stderr
+    assert "S2       transfer" in proc.stdout  # safety classes are surfaced
+    assert "nominal 1:2" in proc.stdout
+    assert "OK - authentic" in proc.stdout
+
+
+def test_pylabrobot_claude_dilution_degrades_gracefully_without_key(tmp_path: Path) -> None:
+    proc = _run_demo("demo-pylabrobot-claude", tmp_path, strip_key=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "ANTHROPIC_API_KEY not set" in proc.stdout
+    assert "OK - authentic" in proc.stdout
