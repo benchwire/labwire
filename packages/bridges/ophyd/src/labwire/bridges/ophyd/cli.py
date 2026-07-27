@@ -6,6 +6,7 @@ Example:
 """
 
 import importlib
+import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -45,6 +46,10 @@ def _load_device(target: str) -> Any:
         )
         raise typer.Exit(2)
     module_name, _, attribute = target.partition(":")
+    if (cwd := str(Path.cwd())) not in sys.path:
+        # python -m semantics: targets resolve relative to where the
+        # operator stands.
+        sys.path.insert(0, cwd)
     try:
         module = importlib.import_module(module_name)
     except ImportError as exc:

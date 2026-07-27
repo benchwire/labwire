@@ -98,3 +98,16 @@ def test_a_missing_factory_attribute_is_reported() -> None:
     result = runner.invoke(cli.app, ["check", "labwire.bridges.pylabrobot:nonexistent"])
     assert result.exit_code != 0
     assert "nonexistent" in result.output
+
+
+def test_check_resolves_targets_relative_to_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A module:factory target imports from the CWD, python -m style."""
+    (tmp_path / "stranger_rig.py").write_text(
+        "from labwire.bridges.pylabrobot.tests_support import build\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(cli.app, ["check", "stranger_rig:build"])
+    assert result.exit_code == 0, result.output
+    assert "S2  aspirate" in result.output

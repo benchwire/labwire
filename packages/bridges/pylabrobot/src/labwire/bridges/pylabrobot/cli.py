@@ -56,6 +56,10 @@ def _load(target: str) -> Any:
             "(the factory must return a configured LiquidHandler)"
         )
     module_name, _, attribute = target.partition(":")
+    if (cwd := str(Path.cwd())) not in sys.path:
+        # python -m semantics: a target like examples.liquid_handling.rig
+        # resolves relative to where the operator stands.
+        sys.path.insert(0, cwd)
     try:
         module = importlib.import_module(module_name)
     except ImportError as exc:

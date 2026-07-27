@@ -47,6 +47,11 @@ changes are expected until then, and are called out explicitly.
   answering `-32700` (and non-object JSON instead of `-32600`) as SPEC §12
   requires. Found by running the new conformance suite against the
   reference server on its first day.
+- Both bridge CLIs (`labwire-pylabrobot check`, `labwire-ophyd`) failed to
+  import `module:factory` targets relative to the working directory, which
+  broke the READMEs' own quickstart commands from a fresh clone. Targets
+  now resolve with the current directory on `sys.path`, `python -m`
+  style. Caught by the stranger test; covered by a regression test.
 
 ## 0.3.0, 2026-07-27
 

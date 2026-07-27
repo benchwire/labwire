@@ -82,13 +82,14 @@ and the residuals. What remains here is deliberately deferred:
   against PyLabRobot's hardware-free chatterbox backend only. Never connected
   to a Hamilton, Tecan, Opentrons, or any other machine; read that package's
   LIMITATIONS section before relying on it.
-- **PyLabRobot bridge follow-ons**: gripper moves (`move_plate`, `move_lid`,
-  `move_resource`, which are the highest-consequence operations and are
-  deliberately unexposed), 96-head operations, and a real vendor backend,
-  which would be the first path to Labwire driving physical liquid-handling
-  hardware.
-- **Real-hardware validation against a physical SCPI instrument.** Until
-  this happens, Labwire claims no real-hardware compatibility at all.
+- **PyLabRobot bridge follow-ons**: 96-head operations, and a real vendor
+  backend, which would be the first path to Labwire driving physical
+  liquid-handling hardware. (Gripper moves shipped in v0.3 as S3
+  commands.)
+- **Real-hardware validation against a physical SCPI instrument.** The
+  transports now exist (TCP and USB-serial, see docs/HARDWARE.md), tested
+  against simulators only. Until a physical instrument is on the bench,
+  Labwire claims no real-hardware compatibility at all.
 
 ## Protocol and implementation
 
@@ -104,5 +105,7 @@ and the residuals. What remains here is deliberately deferred:
 ## Governance
 
 - An independent implementation of the specification by someone other than
-  this project: the real test of whether the spec is a spec.
-- A conformance test suite any implementation can run against itself.
+  this project: the real test of whether the spec is a spec. The
+  conformance suite exists for exactly this (`labwire-conformance`,
+  SPEC §15.3); what remains is someone using it against code we did not
+  write.
