@@ -10,6 +10,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "labwire",
     "labwire-cli",
     "labwire-core",
     "labwire-drivers",
@@ -524,8 +525,27 @@ wheels = [
 ]
 
 [[package]]
+name = "labwire"
+version = "0.3.0"
+source = { editable = "packages/meta" }
+dependencies = [
+    { name = "labwire-cli" },
+    { name = "labwire-core" },
+    { name = "labwire-drivers" },
+    { name = "labwire-sim" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "labwire-cli", editable = "packages/cli" },
+    { name = "labwire-core", editable = "packages/core" },
+    { name = "labwire-drivers", editable = "packages/drivers" },
+    { name = "labwire-sim", editable = "packages/sim" },
+]
+
+[[package]]
 name = "labwire-cli"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "labwire-core" },
@@ -540,7 +560,7 @@ requires-dist = [
 
 [[package]]
 name = "labwire-core"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "pydantic" },
@@ -557,7 +577,7 @@ requires-dist = [
 
 [[package]]
 name = "labwire-drivers"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/drivers" }
 dependencies = [
     { name = "labwire-core" },
@@ -576,7 +596,7 @@ dev = [{ name = "labwire-sim", editable = "packages/sim" }]
 
 [[package]]
 name = "labwire-mcp"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "labwire-core" },
@@ -603,7 +623,7 @@ dev = [
 
 [[package]]
 name = "labwire-ophyd"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/bridges/ophyd" }
 dependencies = [
     { name = "labwire-core" },
@@ -639,7 +659,7 @@ dev = [
 
 [[package]]
 name = "labwire-pylabrobot"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/bridges/pylabrobot" }
 dependencies = [
     { name = "labwire-core" },
@@ -671,7 +691,7 @@ dev = [{ name = "pylabrobot", specifier = ">=0.2" }]
 
 [[package]]
 name = "labwire-sim"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "packages/sim" }
 dependencies = [
     { name = "labwire-core" },

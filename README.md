@@ -43,6 +43,72 @@ buildable now:
 
 ## Five-minute quickstart
 
+From PyPI (Python 3.12+), no checkout needed:
+
+```bash
+pip install labwire
+```
+
+That installs the SDK, three simulated instruments, their drivers, and the
+`labwire` CLI. Declare an instrument and drive it end to end, straight from
+a Python file:
+
+```python
+import asyncio
+
+from labwire.core import (
+    PROTOCOL_VERSION,
+    CommandContext,
+    IdentityInfo,
+    Instrument,
+    InstrumentServer,
+    LabwireClient,
+    MemoryTransport,
+    command,
+)
+from pydantic import BaseModel, ConfigDict
+
+
+class MassReading(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # closed schema: the unit walker demands it
+
+    mass_g: float
+
+
+class Balance(Instrument):
+    """A one-command instrument. Units are mandatory: omit "g" and this refuses to declare."""
+
+    identity = IdentityInfo(
+        manufacturer="You", model="Balance-1", serial_number="B-1", firmware_version="1.0"
+    )
+
+    @command(returns_units={"mass_g": "g"})
+    async def measure(self, ctx: CommandContext) -> MassReading:
+        """Report the settled mass."""
+        return MassReading(mass_g=12.3456)
+
+
+async def main() -> None:
+    server = InstrumentServer(Balance())
+    client_end, server_end = MemoryTransport.pair()
+    server.attach(server_end)
+    async with LabwireClient.attach(client_end) as client:
+        descriptor = await client.describe()
+        print(descriptor.identity.model, "speaks Labwire protocol", PROTOCOL_VERSION)
+        handle = await client.submit("measure", {})
+        result = await handle.result(timeout=5.0)
+        print("mass:", result["mass_g"], "g")
+
+
+asyncio.run(main())
+```
+
+Telemetry streaming, safety confirmations, and ed25519-signed run bundles
+are a few lines more; [examples/quickstart.py](examples/quickstart.py)
+shows them.
+
+From source, for the full demos and examples:
+
 ```bash
 git clone https://github.com/benchwire/labwire.git && cd labwire
 make setup                       # uv installs Python 3.12 + everything

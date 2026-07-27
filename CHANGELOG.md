@@ -4,7 +4,7 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
-## 0.3.0.dev0, unreleased
+## 0.3.0, 2026-07-27
 
 Protocol version `"0.3"`: things, not only quantities. Driven by findings
 F1, F2, and F4 in [SPEC-FINDINGS.md](SPEC-FINDINGS.md), each now resolved

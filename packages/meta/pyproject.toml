@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire"
+version = "0.3.0"
+description = "Labwire quickstart bundle: protocol SDK, simulated instruments, drivers, and CLI"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+keywords = ["laboratory", "instruments", "agents", "json-rpc", "protocol"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+# The zero-hardware quickstart set, pinned as one coherent release. This
+# distribution contains no code and installs no modules of its own: the
+# labwire.* namespace is populated entirely by the pinned dependencies.
+dependencies = [
+  "labwire-core==0.3.0",
+  "labwire-sim==0.3.0",
+  "labwire-drivers==0.3.0",
+  "labwire-cli==0.3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/benchwire/labwire"
+Repository = "https://github.com/benchwire/labwire"
+Changelog = "https://github.com/benchwire/labwire/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+# Metadata-only distribution: nothing to select, and selecting nothing is
+# deliberate.
+bypass-selection = true
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+labwire-sim = { workspace = true }
+labwire-drivers = { workspace = true }
+labwire-cli = { workspace = true }

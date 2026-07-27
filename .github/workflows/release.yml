@@ -1,0 +1,81 @@
+# Publishes every workspace package to PyPI with Trusted Publishing (OIDC).
+#
+# One-time PyPI setup (per package, done by a maintainer on pypi.org under
+# Account -> Publishing -> GitHub): project name as in the matrix below,
+# owner benchwire, repository labwire, workflow release.yml, environment
+# pypi-<project name>. Pending publishers must differ in environment name
+# because PyPI allows only one pending publisher per
+# (owner, repo, workflow, environment) tuple; see
+# https://github.com/pypi/warehouse/issues/16920.
+#
+# Publish jobs run only when the repository variable PYPI_PUBLISHERS_READY
+# is "true", so cutting a GitHub release before the PyPI side is registered
+# builds the artifacts and skips the upload instead of failing.
+
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv build --all-packages
+      - name: Smoke-test the built core wheel outside the workspace
+        run: |
+          uv run --isolated --no-project --with dist/labwire_core-*.whl \
+            python -c "import labwire.core; print('labwire-core', labwire.core.__version__)"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    if: vars.PYPI_PUBLISHERS_READY == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: labwire
+            files: "labwire-*"
+          - project: labwire-core
+            files: "labwire_core-*"
+          - project: labwire-sim
+            files: "labwire_sim-*"
+          - project: labwire-drivers
+            files: "labwire_drivers-*"
+          - project: labwire-cli
+            files: "labwire_cli-*"
+          - project: labwire-mcp
+            files: "labwire_mcp-*"
+          - project: labwire-ophyd
+            files: "labwire_ophyd-*"
+          - project: labwire-pylabrobot
+            files: "labwire_pylabrobot-*"
+    environment: pypi-${{ matrix.project }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist/
+      - name: Select this project's distributions
+        run: |
+          mkdir upload
+          cp dist/${{ matrix.files }} upload/
+          ls -l upload/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: upload/
