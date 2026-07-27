@@ -22,12 +22,14 @@ Example:
 
 import asyncio
 import copy
+import difflib
 import hashlib
 import inspect
 import itertools
 import json
 import logging
 import math
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -36,15 +38,16 @@ from typing import Any, ClassVar, Concatenate, Protocol, cast
 
 from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
-    CONFIRMATION_REQUIRED_CLASSES,
     ChannelSpec,
     CommandSpec,
     IdentityInfo,
     InstrumentDescriptor,
     InterlockSpec,
+    ResourceSpec,
     SafetyClass,
 )
 from labwire.core.errors import (
+    AuthorizationRequiredError,
     BusyError,
     CanceledError,
     ConfirmationRequiredError,
@@ -55,10 +58,13 @@ from labwire.core.errors import (
     LabwireError,
     MethodNotFoundError,
     NotCancelableError,
+    StaleRevisionError,
+    UnknownReferenceError,
     UnsupportedError,
     ValidationError,
 )
-from labwire.core.jcs import jcs_canonical
+from labwire.core.grants import GrantStore, GrantVerdict
+from labwire.core.jcs import jcs_canonical, params_digest
 from labwire.core.messages import (
     TERMINAL_STATES,
     CommandIdParams,
@@ -69,6 +75,10 @@ from labwire.core.messages import (
     InitializeResult,
     PeerInfo,
     Progress,
+    ResourceIndexEntry,
+    ResourceReadParams,
+    ResourceReadResult,
+    ResourceRevision,
     ServerCapabilities,
     SubmitParams,
     SubscribeParams,
@@ -81,6 +91,7 @@ from labwire.core.types import JsonRpcError
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Field,
     TypeAdapter,
     create_model,
 )
@@ -337,6 +348,213 @@ class CommandContext:
         await self._clock.sleep(seconds)
 
 
+class ResourceSnapshot:
+    """One read of a resource: its index and its content, together.
+
+    A reader returns both at once so revision derivation covers exactly what
+    a client would see, and index and content cannot disagree about a moment.
+
+    Example:
+        >>> snap = ResourceSnapshot(index=[], content=None)
+        >>> snap.index
+        []
+    """
+
+    def __init__(self, *, index: list[ResourceIndexEntry], content: Any) -> None:
+        self.index = index
+        self.content = content
+
+
+class InstrumentResource:
+    """A declared resource (SPEC §7.6); created with :func:`resource`.
+
+    Each :class:`Instrument` instance gets its own copy, like channels. The
+    revision is derived from the canonicalized read result, so a driver
+    cannot forget to bump it; :meth:`touch` recomputes it and emits the
+    reserved ``resource/changed`` event when it moved.
+
+    Example:
+        >>> # deck = resource("labwire:deck", kind="deck", ...)
+        >>> # @deck.reader
+        >>> # def _read_deck(self) -> ResourceSnapshot: ...
+    """
+
+    def __init__(
+        self,
+        uri: str,
+        *,
+        kind: str,
+        title: str,
+        description: str,
+        content_model: type[BaseModel],
+        item_kinds: list[str],
+    ) -> None:
+        self.uri = uri
+        self.kind = kind
+        self.title = title
+        self.description = description
+        self.content_model = content_model
+        self.item_kinds = list(item_kinds)
+        self._reader_name: str | None = None
+        self._owner: Any = None
+        self._on_changed: Callable[[str, str], None] | None = None
+        self._last_revision: str | None = None
+        # Validate the declaration now, so a bad content model fails at class
+        # definition time with the same discipline as @command.
+        self.content_schema = content_model.model_json_schema(mode="serialization")
+        self.content_schema.pop("title", None)
+        try:
+            self.spec_template = ResourceSpec(
+                uri=uri,
+                kind=kind,
+                title=title,
+                description=description,
+                item_kinds=self.item_kinds,
+                revision="unread",
+                content_schema=self.content_schema,
+            )
+        except PydanticValidationError as exc:
+            reasons = "; ".join(
+                str(error["msg"]).removeprefix("Value error, ") for error in exc.errors()
+            )
+            raise TypeError(f"invalid resource declaration {uri!r}: {reasons}") from exc
+
+    def reader(self, fn: Callable[[Any], ResourceSnapshot]) -> Callable[[Any], ResourceSnapshot]:
+        """Register the method that produces this resource's snapshot.
+
+        Example:
+            >>> # @deck.reader
+            >>> # def _read_deck(self) -> ResourceSnapshot: ...
+        """
+        self._reader_name = fn.__name__
+        return fn
+
+    def _bound(self) -> ResourceSnapshot:
+        if self._reader_name is None or self._owner is None:
+            raise TypeError(f"resource {self.uri!r} has no @reader method")
+        snapshot = getattr(self._owner, self._reader_name)()
+        if not isinstance(snapshot, ResourceSnapshot):
+            raise TypeError(
+                f"resource {self.uri!r}: reader must return a ResourceSnapshot, "
+                f"got {type(snapshot).__name__}"
+            )
+        return snapshot
+
+    def read(self, clock: Clock | None = None) -> ResourceReadResult:
+        """Read the resource: index, content, and the derived revision.
+
+        Example:
+            >>> # instrument.deck.read()
+        """
+        snapshot = self._bound()
+        content = _jsonable(snapshot.content)
+        index = [entry.model_dump(mode="json", exclude_none=True) for entry in snapshot.index]
+        revision = self._derive_revision(index, content)
+        self._last_revision = revision
+        moment = (clock or SystemClock()).now()
+        return ResourceReadResult(
+            uri=self.uri,
+            kind=self.kind,
+            revision=revision,
+            read_at=rfc3339(moment),
+            index_complete=True,
+            index=[ResourceIndexEntry.model_validate(entry) for entry in index],
+            content=content,
+        )
+
+    def _derive_revision(self, index: list[dict[str, Any]], content: Any) -> str:
+        digest = hashlib.sha256(jcs_canonical({"index": index, "content": content})).hexdigest()
+        return digest[:16]
+
+    def revision(self) -> str:
+        """The current derived revision (reads the resource).
+
+        Example:
+            >>> # instrument.deck.revision()
+        """
+        snapshot = self._bound()
+        content = _jsonable(snapshot.content)
+        index = [entry.model_dump(mode="json", exclude_none=True) for entry in snapshot.index]
+        return self._derive_revision(index, content)
+
+    def touch(self) -> None:
+        """Recompute the revision and emit ``resource/changed`` if it moved.
+
+        Drivers call this after anything that may have changed state; a
+        touch that changed nothing emits nothing, so calling it liberally
+        is safe.
+
+        Example:
+            >>> # self.deck.touch()
+        """
+        previous = self._last_revision
+        current = self.revision()
+        self._last_revision = current
+        if current != previous and self._on_changed is not None:
+            self._on_changed(self.uri, current)
+
+    def spec(self) -> ResourceSpec:
+        """The declaration for the descriptor, with a current revision.
+
+        Example:
+            >>> # instrument.deck.spec().kind
+        """
+        return ResourceSpec(
+            uri=self.uri,
+            kind=self.kind,
+            title=self.title,
+            description=self.description,
+            item_kinds=self.item_kinds,
+            revision=self.revision(),
+            content_schema=self.content_schema,
+        )
+
+
+def resource(
+    uri: str,
+    *,
+    kind: str,
+    title: str,
+    description: str,
+    content_model: type[BaseModel],
+    item_kinds: list[str] | None = None,
+) -> InstrumentResource:
+    """Declare a resource at class scope (SPEC §7.6), like a channel.
+
+    ``content_model`` is a pydantic model whose serialization schema becomes
+    ``content_schema``; its numeric fields must carry ``unit`` keywords via
+    ``json_schema_extra`` (see :func:`unit_field`). The declaration is
+    validated immediately, with the same import-time discipline as
+    :func:`command`.
+
+    Example:
+        >>> # deck = resource("labwire:deck", kind="deck", title="Deck",
+        >>> #     description="...", content_model=DeckState,
+        >>> #     item_kinds=["labware", "container"])
+    """
+    return InstrumentResource(
+        uri,
+        kind=kind,
+        title=title,
+        description=description,
+        content_model=content_model,
+        item_kinds=item_kinds or [],
+    )
+
+
+def unit_field(unit_code: str, **kwargs: Any) -> Any:
+    """A pydantic ``Field`` whose schema carries the SPEC §7.6 unit keyword.
+
+    Example:
+        >>> from pydantic import BaseModel
+        >>> class Syringe(BaseModel):
+        ...     capacity_ul: float = unit_field("uL")
+    """
+    extra = dict(kwargs.pop("json_schema_extra", None) or {})
+    extra["unit"] = unit_code
+    return Field(json_schema_extra=extra, **kwargs)
+
+
 def _jsonable(value: Any) -> Any:
     """Normalize a handler's return value to plain JSON types.
 
@@ -490,6 +708,7 @@ class Instrument:
     def __init__(self) -> None:
         self._channels: dict[str, TelemetryChannel] = {}
         self._interlocks: dict[str, Interlock] = {}
+        self._resources: dict[str, InstrumentResource] = {}
         for klass in reversed(type(self).__mro__):
             for attr_name, attr in vars(klass).items():
                 if isinstance(attr, TelemetryChannel):
@@ -502,6 +721,13 @@ class Instrument:
                     mine._on_change = None  # pyright: ignore[reportPrivateUsage]
                     setattr(self, attr_name, mine)
                     self._interlocks[mine.name] = mine
+                elif isinstance(attr, InstrumentResource):
+                    own = copy.copy(attr)
+                    own._owner = self  # pyright: ignore[reportPrivateUsage]
+                    own._on_changed = None  # pyright: ignore[reportPrivateUsage]
+                    own._last_revision = None  # pyright: ignore[reportPrivateUsage]
+                    setattr(self, attr_name, own)
+                    self._resources[own.uri] = own
 
     def commands(self) -> dict[str, CommandMeta]:
         """Return the declared commands, by name."""
@@ -524,6 +750,7 @@ class Instrument:
             commands=[meta.spec for meta in self.commands().values()],
             channels=[ch.spec for ch in self._channels.values()],
             interlocks=[lock.spec() for lock in self._interlocks.values()],
+            resources=[res.spec() for res in self._resources.values()],
             max_concurrent_commands=self.max_concurrent_commands,
         )
 
@@ -599,6 +826,9 @@ class _Run:
         self.hasher = hashlib.sha256()
         self.channels: set[str] = set()
         self.record_lines: list[bytes] | None = None  # retained iff manifests enabled
+        self.authorization: GrantVerdict | None = None
+        self.revisions_at_start: dict[str, str] = {}
+        self.revisions_at_end: dict[str, str] = {}
 
     def add_record(self, canonical: bytes) -> None:
         line = canonical + b"\n"
@@ -616,12 +846,18 @@ class _Run:
         return self.status == "canceling"
 
     def snapshot(self) -> dict[str, Any]:
+        changed = [
+            ResourceRevision(uri=uri, revision=self.revisions_at_end[uri])
+            for uri in sorted(self.revisions_at_end)
+            if self.revisions_at_end[uri] != self.revisions_at_start.get(uri)
+        ]
         status = CommandStatus(
             command_id=self.run_id,
             status=self.status,
             progress=self.progress,
             result=self.result,
             error=self.error,
+            resource_revisions=changed or None,
         )
         return status.model_dump(mode="json", exclude_none=True)
 
@@ -710,11 +946,37 @@ class InstrumentServer:
         manifest_dir: Path | str | None = None,
         signing_key: SigningKey | None = None,
         confirmation_token: str | None = None,
+        grant_store: Path | str | GrantStore | None = None,
     ) -> None:
         self.instrument = instrument
         self.clock: Clock = clock if clock is not None else SystemClock()
         self.server_name = server_name
         self._confirmation_token = confirmation_token
+        if isinstance(grant_store, GrantStore):
+            self._grant_store: GrantStore | None = grant_store
+        elif grant_store is not None:
+            self._grant_store = GrantStore(
+                Path(grant_store), serial_number=instrument.identity.serial_number
+            )
+        else:
+            env = os.environ.get("LABWIRE_GRANT_STORE")
+            self._grant_store = (
+                GrantStore(Path(env), serial_number=instrument.identity.serial_number)
+                if env
+                else None
+            )
+        declared_s3 = [
+            meta.spec.name
+            for meta in instrument.commands().values()
+            if meta.spec.safety_class == "S3"
+        ]
+        if declared_s3 and self._grant_store is None:
+            # SPEC §6.1: hazardous commands with no way to authorize them is a
+            # misconfiguration, not permissiveness.
+            raise TypeError(
+                f"instrument declares S3 command(s) {sorted(declared_s3)} but no grant "
+                "store is configured; pass grant_store= or set LABWIRE_GRANT_STORE"
+            )
         self._manifest_dir = Path(manifest_dir) if manifest_dir is not None else None
         self._signing_key = signing_key
         if self._manifest_dir is not None and self._signing_key is None:
@@ -731,6 +993,8 @@ class InstrumentServer:
             ch._clock = self.clock  # pyright: ignore[reportPrivateUsage]
         for lock in instrument._interlocks.values():  # pyright: ignore[reportPrivateUsage]
             lock._on_change = self._interlock_changed  # pyright: ignore[reportPrivateUsage]
+        for declared in instrument._resources.values():  # pyright: ignore[reportPrivateUsage]
+            declared._on_changed = self._resource_changed  # pyright: ignore[reportPrivateUsage]
 
     # -- wiring ---------------------------------------------------------------
 
@@ -851,6 +1115,8 @@ class InstrumentServer:
         match method:
             case "instrument/describe":
                 return self.instrument.describe().model_dump(mode="json", exclude_none=True)
+            case "resource/read":
+                return self._read_resource(params)
             case "command/submit":
                 return await self._submit(session, params)
             case "command/status":
@@ -874,7 +1140,11 @@ class InstrumentServer:
             protocol_version=PROTOCOL_VERSION,
             server_info=PeerInfo(name=self.server_name, version=__version__),
             capabilities=ServerCapabilities(
-                telemetry=True, events=True, manifests=self._manifest_dir is not None
+                telemetry=True,
+                events=True,
+                manifests=self._manifest_dir is not None,
+                resources=bool(self.instrument._resources),  # pyright: ignore[reportPrivateUsage]
+                grants=self._grant_store is not None,
             ),
         )
         return result.model_dump(mode="json")
@@ -895,9 +1165,218 @@ class InstrumentServer:
     def _active_runs(self) -> list[_Run]:
         return [run for run in self._runs.values() if run.active]
 
+    def _collect_references(
+        self, meta: "CommandMeta", normalized: dict[str, Any]
+    ) -> list[tuple[str, str, dict[str, str]]]:
+        """``(pointer, value, resource_ref)`` for every reference in a submission.
+
+        Walks the schema and the instance together, so the second element of
+        an array is nameable by RFC 6901 pointer in the refusal.
+        """
+        found: list[tuple[str, str, dict[str, str]]] = []
+
+        def walk(node: dict[str, Any], instance: Any, pointer: str) -> None:
+            ref = node.get("resource_ref")
+            if isinstance(ref, dict) and isinstance(instance, str):
+                found.append((pointer, instance, cast("dict[str, str]", ref)))
+                return
+            reference = node.get("$ref")
+            if isinstance(reference, str) and reference.startswith("#/$defs/"):
+                definitions = cast("dict[str, Any]", meta.spec.params_schema.get("$defs") or {})
+                target = definitions.get(reference.removeprefix("#/$defs/"))
+                if isinstance(target, dict):
+                    walk(cast("dict[str, Any]", target), instance, pointer)
+                return
+            for combinator in ("anyOf", "oneOf", "allOf"):
+                variants = node.get(combinator)
+                if isinstance(variants, list):
+                    for variant in cast("list[Any]", variants):
+                        if isinstance(variant, dict):
+                            walk(cast("dict[str, Any]", variant), instance, pointer)
+            properties = node.get("properties")
+            if isinstance(properties, dict) and isinstance(instance, dict):
+                for name, member in cast("dict[str, Any]", properties).items():
+                    if isinstance(member, dict) and name in instance:
+                        walk(
+                            cast("dict[str, Any]", member),
+                            cast("dict[str, Any]", instance)[name],
+                            f"{pointer}/{name}",
+                        )
+            items = node.get("items")
+            if isinstance(items, dict) and isinstance(instance, list):
+                for index, element in enumerate(cast("list[Any]", instance)):
+                    walk(cast("dict[str, Any]", items), element, f"{pointer}/{index}")
+            prefix_items = node.get("prefixItems")
+            if isinstance(prefix_items, list) and isinstance(instance, list):
+                for index, (member, element) in enumerate(
+                    zip(cast("list[Any]", prefix_items), cast("list[Any]", instance), strict=False)
+                ):
+                    if isinstance(member, dict):
+                        walk(cast("dict[str, Any]", member), element, f"{pointer}/{index}")
+
+        walk(meta.spec.params_schema, normalized, "")
+        return found
+
+    def _resolve_references(self, meta: "CommandMeta", normalized: dict[str, Any]) -> None:
+        """SPEC §10.4: every reference resolves against a fresh read, or refuse."""
+        reads: dict[str, ResourceReadResult] = {}
+        for pointer, value, ref in self._collect_references(meta, normalized):
+            enumerated_by = ref["enumerated_by"]
+            expected_kind = ref["kind"]
+            source = self.instrument._resources.get(enumerated_by)  # pyright: ignore[reportPrivateUsage]
+            if source is None:  # closure makes this unreachable when served
+                raise UnknownReferenceError(
+                    f"parameter {pointer}: enumerating resource {enumerated_by!r} is not "
+                    "declared by this instrument",
+                    details={"pointer": pointer, "reference": value, "reason": "unknown_resource"},
+                )
+            if enumerated_by not in reads:
+                reads[enumerated_by] = source.read(self.clock)
+            snapshot = reads[enumerated_by]
+            resolved_kinds, resolved_prefix, reason = self._resolve_one(snapshot, value)
+            if resolved_kinds is not None and expected_kind in resolved_kinds:
+                continue
+            if resolved_kinds is not None:
+                reason = "kind_mismatch"
+            parameter = pointer.strip("/").split("/", 1)[0]
+            candidates = [entry.uri for entry in snapshot.index if expected_kind in entry.kinds] + [
+                f"{entry.uri}/{item_id}"
+                for entry in snapshot.index
+                if entry.children is not None and expected_kind in entry.children.kinds
+                for item_id in entry.children.ids
+            ]
+            close = difflib.get_close_matches(value, candidates, n=5, cutoff=0.4)
+            details: dict[str, Any] = {
+                "pointer": pointer,
+                "parameter": parameter,
+                "reference": value,
+                "expected_kind": expected_kind,
+                "enumerated_by": enumerated_by,
+                "reason": reason,
+                "read": {"method": "resource/read", "params": {"uri": enumerated_by}},
+            }
+            if resolved_prefix is not None:
+                details["resolved_prefix"] = resolved_prefix
+            if resolved_kinds is not None:
+                details["resolved_kinds"] = list(resolved_kinds)
+            if close:
+                details["did_you_mean"] = close
+            article = "a" if expected_kind[0] not in "aeiou" else "an"
+            raise UnknownReferenceError(
+                f"parameter {pointer}: {value!r} is not {article} {expected_kind} on this "
+                "instrument",
+                details=details,
+            )
+
+    @staticmethod
+    def _resolve_one(
+        snapshot: ResourceReadResult, value: str
+    ) -> tuple[list[str] | None, str | None, str]:
+        """Resolve one reference per SPEC §10.2: kinds, longest prefix, reason."""
+        if not value.startswith("labwire:") or value.endswith("/") or "//" in value:
+            return None, None, "malformed_uri"
+        prefix: str | None = None
+        for entry in snapshot.index:
+            if entry.uri == value:
+                return list(entry.kinds), entry.uri, "no_such_item"
+            if value.startswith(entry.uri + "/"):
+                prefix = entry.uri
+                item_id = value.removeprefix(entry.uri + "/")
+                if entry.children is not None and item_id in entry.children.ids:
+                    return list(entry.children.kinds), entry.uri, "no_such_item"
+        if prefix is not None:
+            return None, prefix, "no_such_item"
+        return None, None, "unknown_resource"
+
+    def _check_revisions(self, if_revision: dict[str, str]) -> None:
+        """SPEC §10.5: refuse a stale plan before anything is spent."""
+        for uri, submitted in if_revision.items():
+            declared = self.instrument._resources.get(uri)  # pyright: ignore[reportPrivateUsage]
+            if declared is None:
+                raise UnknownReferenceError(
+                    f"if_revision names {uri!r}, which this instrument does not declare",
+                    details={"reference": uri, "reason": "unknown_resource"},
+                )
+            current = declared.revision()
+            if current != submitted:
+                raise StaleRevisionError(
+                    f"{uri} has moved since this plan was made",
+                    details={
+                        "uri": uri,
+                        "submitted_revision": submitted,
+                        "current_revision": current,
+                        "read": {"method": "resource/read", "params": {"uri": uri}},
+                    },
+                )
+
+    def _authorize_s3(
+        self, meta: "CommandMeta", submit: SubmitParams, normalized: dict[str, Any]
+    ) -> GrantVerdict:
+        """SPEC §8.6: verify and atomically consume a grant, or refuse."""
+        digest = params_digest(normalized)
+        if self._grant_store is None:  # pragma: no cover - refused at construction
+            raise AuthorizationRequiredError(
+                f"command {submit.command!r} is S3 and this server holds no grant store",
+                details={
+                    "safety_class": "S3",
+                    "command": submit.command,
+                    "reason": "absent",
+                    "mintable_by_agent": False,
+                },
+            )
+        if submit.authorization is None:
+            pending = self._grant_store.record_pending(
+                command=submit.command,
+                params=normalized,
+                params_digest=digest,
+                now=self.clock.now(),
+            )
+            raise AuthorizationRequiredError(
+                f"{submit.command} is S3 and requires an operator grant bound to these "
+                "exact parameters; a confirmation string cannot authorize it",
+                details={
+                    "safety_class": "S3",
+                    "command": submit.command,
+                    "reason": "absent",
+                    "request_id": pending.request_id,
+                    "params_digest": digest,
+                    "digest_alg": "sha256",
+                    "canonicalization": "RFC8785",
+                    "mintable_by_agent": False,
+                    "operator_instruction": (
+                        "On the instrument host run: labwire grant list, then "
+                        f"labwire grant approve {pending.request_id} --ttl 15m --uses 1"
+                    ),
+                },
+            )
+        verdict = self._grant_store.verify_and_consume(
+            grant_id=submit.authorization.grant_id,
+            command=submit.command,
+            params_digest=digest,
+            now=self.clock.now(),
+        )
+        if not verdict.ok:
+            details: dict[str, Any] = {
+                "safety_class": "S3",
+                "command": submit.command,
+                "reason": verdict.reason,
+                "params_digest": digest,
+                "digest_alg": "sha256",
+                "canonicalization": "RFC8785",
+                "mintable_by_agent": False,
+            }
+            raise AuthorizationRequiredError(
+                f"the presented grant does not authorize this call: {verdict.reason}",
+                details=details,
+            )
+        return verdict
+
     async def _submit(self, session: _ServerSession, params: dict[str, Any]) -> dict[str, Any]:
         # Rejection precedence per SPEC §12.1: unsupported → validation →
-        # interlock → capacity busy.
+        # unknown_reference → stale_revision → interlock → capacity busy →
+        # confirmation / authorization. Everything knowable without an
+        # operator is checked first, so an agent is never asked to confirm,
+        # and a single-use grant is never spent, on a call that could not run.
         submit = self._validate(SubmitParams, params)
         meta = self.instrument.commands().get(submit.command)
         if meta is None:
@@ -909,14 +1388,12 @@ class InstrumentServer:
                 f"params for {submit.command!r} failed validation",
                 details={"errors": _pydantic_error_details(exc)},
             ) from exc
-        if meta.spec.safety_class in CONFIRMATION_REQUIRED_CLASSES and not self._confirmed(
-            submit.confirmation
-        ):
-            raise ConfirmationRequiredError(
-                f"command {submit.command!r} is {meta.spec.safety_class} and requires "
-                "an operator confirmation value",
-                details={"safety_class": meta.spec.safety_class},
-            )
+        # One object is validated, executed, digested, and recorded (SPEC §8.2):
+        # the normalized params, with schema defaults applied.
+        normalized = validated.model_dump(mode="json", by_alias=True)
+        self._resolve_references(meta, normalized)
+        if submit.if_revision:
+            self._check_revisions(submit.if_revision)
         tripped = {
             lock.name
             for lock in self.instrument._interlocks.values()  # pyright: ignore[reportPrivateUsage]
@@ -935,7 +1412,18 @@ class InstrumentServer:
             raise BusyError(
                 f"at capacity: {self.instrument.max_concurrent_commands} command slot(s) in use"
             )
-        run = _Run(str(uuid.uuid4()), meta, submit.params, session)
+        authorization: GrantVerdict | None = None
+        if meta.spec.safety_class == "S3":
+            # A confirmation MUST NOT satisfy S3, whatever it contains (SPEC §8.6).
+            authorization = self._authorize_s3(meta, submit, normalized)
+        elif meta.spec.safety_class == "S2" and not self._confirmed(submit.confirmation):
+            raise ConfirmationRequiredError(
+                f"command {submit.command!r} is S2 and requires an operator confirmation value",
+                details={"safety_class": meta.spec.safety_class},
+            )
+        run = _Run(str(uuid.uuid4()), meta, normalized, session)
+        run.authorization = authorization
+        run.revisions_at_start = self._resource_revisions()
         if self._manifest_dir is not None:
             run.record_lines = []
         run.timestamps["submitted"] = rfc3339(self.clock.now())
@@ -945,6 +1433,31 @@ class InstrumentServer:
         run.task.add_done_callback(lambda _task, r=run: self._reap_run(r))
         self._track(run.task)
         return {"command_id": run.run_id, "status": "accepted"}
+
+    def _read_resource(self, params: dict[str, Any]) -> dict[str, Any]:
+        parsed = self._validate(ResourceReadParams, params)
+        declared = self.instrument._resources.get(parsed.uri)  # pyright: ignore[reportPrivateUsage]
+        if declared is None:
+            reason = (
+                "malformed_uri" if not parsed.uri.startswith("labwire:") else "unknown_resource"
+            )
+            known = sorted(self.instrument._resources)  # pyright: ignore[reportPrivateUsage]
+            raise UnknownReferenceError(
+                f"{parsed.uri!r} is not a resource this instrument declares"
+                + (f"; declared: {', '.join(known)}" if known else ""),
+                details={"reference": parsed.uri, "reason": reason},
+            )
+        return declared.read(self.clock).model_dump(mode="json", exclude_none=True)
+
+    def _resource_changed(self, uri: str, revision: str) -> None:
+        self._emit_event("resource/changed", "info", {"uri": uri, "revision": revision})
+
+    def _resource_revisions(self) -> dict[str, str]:
+        """Every declared resource's current revision, for run bracketing."""
+        return {
+            uri: declared.revision()
+            for uri, declared in self.instrument._resources.items()  # pyright: ignore[reportPrivateUsage]
+        }
 
     def _confirmed(self, confirmation: str | None) -> bool:
         """Whether a submitted confirmation value is acceptable (SPEC §8.6).
@@ -1023,6 +1536,13 @@ class InstrumentServer:
     def _finish(self, run: _Run, status: CommandState) -> None:
         run.timestamps["completed"] = rfc3339(self.clock.now())
         run.progress = None  # progress is a running-state concept (SPEC §8.2)
+        run.revisions_at_end = self._resource_revisions()
+        for uri, revision in run.revisions_at_end.items():
+            if revision != run.revisions_at_start.get(uri):
+                declared = self.instrument._resources.get(uri)  # pyright: ignore[reportPrivateUsage]
+                if declared is not None:
+                    declared._last_revision = revision  # pyright: ignore[reportPrivateUsage]
+                    self._resource_changed(uri, revision)
         self._transition(run, status)
         if self._manifest_dir is not None and self._signing_key is not None:
             try:
@@ -1040,6 +1560,7 @@ class InstrumentServer:
                 "name": run.meta.spec.name,
                 "params": run.params,
                 "safety_class": run.meta.spec.safety_class,
+                "params_digest": params_digest(run.params),
             },
             "status": run.status,
             "data": {
@@ -1053,6 +1574,42 @@ class InstrumentServer:
             manifest["result"] = run.result
         if run.error is not None:
             manifest["error"] = run.error.model_dump(mode="json", exclude_none=True)
+        if run.meta.spec.safety_class == "S2":
+            manifest["authorization"] = {"mode": "confirmation", "identity_verified": False}
+        elif run.meta.spec.safety_class == "S3" and run.authorization is not None:
+            grant = run.authorization.grant
+            assert grant is not None
+            block: dict[str, Any] = {
+                "mode": "grant",
+                # The id is a bearer value and a signed bundle is durable, so
+                # only its digest is recorded (SPEC §13.1).
+                "grant_digest": "sha256:" + hashlib.sha256(grant.grant_id.encode()).hexdigest(),
+                "expires_at": grant.expires_at,
+                "use_index": run.authorization.use_index,
+                "identity_verified": False,
+            }
+            for label, value in (
+                ("request_id", grant.request_id),
+                ("issued_by", grant.issued_by),
+                ("note", grant.note),
+            ):
+                if value is not None:
+                    block[label] = value
+            manifest["authorization"] = block
+        changed = {
+            uri: revision
+            for uri, revision in run.revisions_at_end.items()
+            if revision != run.revisions_at_start.get(uri)
+        }
+        if changed:
+            manifest["resource_revisions"] = [
+                {
+                    "uri": uri,
+                    "revision_at_start": run.revisions_at_start.get(uri, ""),
+                    "revision_at_end": revision,
+                }
+                for uri, revision in sorted(changed.items())
+            ]
         assert self._manifest_dir is not None
         assert self._signing_key is not None
         doc = sign_manifest(manifest, self._signing_key)

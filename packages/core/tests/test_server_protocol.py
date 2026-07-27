@@ -159,7 +159,7 @@ async def test_initialize_result_and_gating() -> None:
                 "capabilities": {},
             },
         )
-        assert result["protocol_version"] == "0.2"
+        assert result["protocol_version"] == "0.3"
         # resources and grants advertise False until the server implements
         # them (SPEC §6.1): a not-yet-implementing server must say so.
         assert result["capabilities"] == {

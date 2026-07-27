@@ -12,6 +12,7 @@ Example:
 from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
     CONFIRMATION_REQUIRED_CLASSES,
+    KIND_REGISTRY,
     ChannelSpec,
     CommandSpec,
     IdentityInfo,
@@ -19,6 +20,7 @@ from labwire.core.capabilities import (
     InterlockSpec,
     ResourceSpec,
     SafetyClass,
+    valid_kind,
 )
 from labwire.core.client import (
     CommandHandle,
@@ -47,7 +49,8 @@ from labwire.core.errors import (
     ValidationError,
     error_from_wire,
 )
-from labwire.core.jcs import jcs_canonical, jcs_dumps
+from labwire.core.grants import Grant, GrantStore, GrantVerdict
+from labwire.core.jcs import jcs_canonical, jcs_dumps, params_digest
 from labwire.core.messages import (
     MESSAGE_TYPES,
     Authorization,
@@ -67,14 +70,18 @@ from labwire.core.server import (
     Clock,
     CommandContext,
     Instrument,
+    InstrumentResource,
     InstrumentServer,
     Interlock,
+    ResourceSnapshot,
     RunRecord,
     SystemClock,
     TelemetryChannel,
     channel,
     command,
     interlock,
+    resource,
+    unit_field,
 )
 from labwire.core.session import JsonRpcSession, SessionClosed
 from labwire.core.signing import (
@@ -90,6 +97,7 @@ from labwire.core.transport import MemoryTransport, Transport, TransportClosed, 
 
 __all__ = [
     "CONFIRMATION_REQUIRED_CLASSES",
+    "KIND_REGISTRY",
     "MANIFEST_VERSION",
     "MESSAGE_TYPES",
     "PROTOCOL_VERSION",
@@ -109,10 +117,14 @@ __all__ = [
     "EventNotification",
     "EventSeverity",
     "EventStream",
+    "Grant",
+    "GrantStore",
+    "GrantVerdict",
     "HardwareFaultError",
     "IdentityInfo",
     "Instrument",
     "InstrumentDescriptor",
+    "InstrumentResource",
     "InstrumentServer",
     "Interlock",
     "InterlockError",
@@ -133,6 +145,7 @@ __all__ = [
     "ResourceIndexEntry",
     "ResourceReadResult",
     "ResourceRevision",
+    "ResourceSnapshot",
     "ResourceSpec",
     "RunRecord",
     "SafetyClass",
@@ -158,7 +171,11 @@ __all__ = [
     "interlock",
     "jcs_canonical",
     "jcs_dumps",
+    "params_digest",
+    "resource",
     "sign_manifest",
+    "unit_field",
+    "valid_kind",
     "verify_bundle",
     "verify_manifest",
 ]

@@ -96,11 +96,37 @@ class _M(BaseModel):
 
 
 class ManifestCommand(_M):
-    """The submitted command, verbatim, and its enforced class (SPEC §13.1)."""
+    """The run's command: normalized params, class, and digest (SPEC §13.1).
+
+    ``params`` are the normalized parameters from v0.3 on; in 0.2 bundles
+    they are the raw submission. ``params_digest`` is absent in 0.2 bundles.
+    """
 
     name: str
     params: dict[str, Any]
     safety_class: str | None = None
+    params_digest: str | None = None
+
+
+class ManifestAuthorization(_M):
+    """How the run was authorized (SPEC §13.1); absent for S0/S1 and in 0.2."""
+
+    mode: str
+    identity_verified: bool
+    grant_digest: str | None = None
+    request_id: str | None = None
+    expires_at: str | None = None
+    use_index: int | None = None
+    issued_by: str | None = None
+    note: str | None = None
+
+
+class ManifestResourceRevision(_M):
+    """One resource's revision window across the run (SPEC §13.1)."""
+
+    uri: str
+    revision_at_start: str
+    revision_at_end: str
 
 
 class ManifestData(_M):
@@ -140,6 +166,8 @@ class Manifest(_M):
     instrument: IdentityInfo
     command: ManifestCommand
     status: CommandState
+    authorization: ManifestAuthorization | None = None
+    resource_revisions: list[ManifestResourceRevision] | None = None
     result: Any = None
     error: JsonRpcError | None = None
     data: ManifestData

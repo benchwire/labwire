@@ -27,6 +27,7 @@ from labwire.core.messages import (
     EventNotification,
     InitializeResult,
     PeerInfo,
+    ResourceReadResult,
     ServerCapabilities,
     SubmitResult,
     SubscribeResult,
@@ -333,13 +334,20 @@ class LabwireClient:
         return InstrumentDescriptor.model_validate(raw)
 
     async def submit(
-        self, command: str, params: dict[str, Any], *, confirmation: str | None = None
+        self,
+        command: str,
+        params: dict[str, Any],
+        *,
+        confirmation: str | None = None,
+        authorization: str | None = None,
+        if_revision: dict[str, str] | None = None,
     ) -> CommandHandle:
         """Submit a command and return a handle to its run (SPEC §8.2).
 
-        ``confirmation`` is REQUIRED for commands whose ``safety_class`` is
-        ``S2`` or ``S3`` (SPEC §8.6); omitting it raises
-        :class:`ConfirmationRequiredError`.
+        ``confirmation`` is REQUIRED for ``S2`` commands, and
+        ``authorization`` (an operator grant id) for ``S3`` (SPEC §8.6); a
+        confirmation never satisfies ``S3``. ``if_revision`` maps resource
+        URIs to the revisions the plan was made against (SPEC §10.5).
 
         Example:
             >>> # handle = await client.submit("dispense", {"volume_ul": 500.0},
@@ -348,11 +356,25 @@ class LabwireClient:
         payload: dict[str, Any] = {"command": command, "params": params}
         if confirmation is not None:
             payload["confirmation"] = confirmation
+        if authorization is not None:
+            payload["authorization"] = {"grant_id": authorization}
+        if if_revision:
+            payload["if_revision"] = dict(if_revision)
         raw = await self._request("command/submit", payload)
         result = SubmitResult.model_validate(raw)
         handle = CommandHandle(self, result.command_id)
         self._handles[result.command_id] = handle
         return handle
+
+    async def read_resource(self, uri: str) -> ResourceReadResult:
+        """Read a declared resource: index, content, and revision (SPEC §10.2).
+
+        Example:
+            >>> # deck = await client.read_resource("labwire:deck")
+            >>> # deck.revision
+        """
+        raw = await self._request("resource/read", {"uri": uri})
+        return ResourceReadResult.model_validate(raw)
 
     def telemetry(
         self, channels: list[str], *, max_rate_hz: float | None = None

@@ -1,6 +1,8 @@
 """Tests for v0.2: mandatory UCUM units and S0-S3 safety classes (SPEC §7, §8.6)."""
 
+import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import TypedDict
 
 import pytest
@@ -107,6 +109,9 @@ class SafetyRig(Instrument):
 
 async def _connect(**server_kwargs: object) -> tuple[SafetyRig, InstrumentServer, LabwireClient]:
     rig = SafetyRig()
+    # The rig declares an S3 command, and a server with S3 commands and no
+    # grant store must refuse to start (SPEC 6.1), so every connection gets one.
+    server_kwargs.setdefault("grant_store", Path(tempfile.mkdtemp(prefix="labwire-grants-")))
     server = InstrumentServer(rig, **server_kwargs)  # pyright: ignore[reportArgumentType]
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
@@ -284,13 +289,90 @@ async def test_s2_without_confirmation_is_rejected(
     assert error.details == {"safety_class": "S2"}
 
 
-async def test_s3_without_confirmation_is_rejected(
+async def test_s3_without_a_grant_is_rejected_with_a_pending_request(
     rig: tuple[SafetyRig, InstrumentServer, LabwireClient],
 ) -> None:
+    """S3 takes a grant, not a confirmation, and the refusal is productive."""
+    from labwire.core import AuthorizationRequiredError
+
     _instrument, _server, client = rig
-    with pytest.raises(ConfirmationRequiredError) as excinfo:
+    with pytest.raises(AuthorizationRequiredError) as excinfo:
         await client.submit("irradiate", {"joules": 5.0})
-    assert excinfo.value.details == {"safety_class": "S3"}
+    details = excinfo.value.details
+    assert details is not None
+    assert details["safety_class"] == "S3"
+    assert details["reason"] == "absent"
+    assert details["mintable_by_agent"] is False
+    assert details["request_id"].startswith("req-")
+    assert details["params_digest"].startswith("sha256:")
+
+
+async def test_a_confirmation_never_satisfies_s3(
+    rig: tuple[SafetyRig, InstrumentServer, LabwireClient],
+) -> None:
+    """The F4 fix: the standing S2 token does not move the laser."""
+    from labwire.core import AuthorizationRequiredError
+
+    _instrument, _server, client = rig
+    with pytest.raises(AuthorizationRequiredError):
+        await client.submit("irradiate", {"joules": 5.0}, confirmation=GRANT)
+
+
+async def test_an_approved_grant_runs_s3_exactly_once(
+    rig: tuple[SafetyRig, InstrumentServer, LabwireClient],
+) -> None:
+    """Refusal creates the request; approval creates the grant; binding holds."""
+    from labwire.core import AuthorizationRequiredError
+
+    _instrument, server, client = rig
+    with pytest.raises(AuthorizationRequiredError) as refused:
+        await client.submit("irradiate", {"joules": 5.0})
+    assert refused.value.details is not None
+    request_id = refused.value.details["request_id"]
+
+    store = server._grant_store  # pyright: ignore[reportPrivateUsage]
+    assert store is not None
+    from datetime import timedelta
+
+    grant = store.approve(request_id, now=server.clock.now(), ttl=timedelta(minutes=15), max_uses=1)
+    handle = await client.submit("irradiate", {"joules": 5.0}, authorization=grant.grant_id)
+    assert (await handle.result(timeout=5.0)) == {"delivered_j": 5.0}
+
+    # the single use is spent: the identical call is refused as exhausted
+    with pytest.raises(AuthorizationRequiredError) as spent:
+        await client.submit("irradiate", {"joules": 5.0}, authorization=grant.grant_id)
+    assert spent.value.details is not None
+    assert spent.value.details["reason"] == "exhausted"
+
+
+async def test_a_grant_binds_to_the_exact_parameters(
+    rig: tuple[SafetyRig, InstrumentServer, LabwireClient],
+) -> None:
+    """A valid, unexpired, correct-command grant still fails on other values.
+
+    This is the beat that proves the binding is to parameters rather than an
+    S3-shaped password.
+    """
+    from datetime import timedelta
+
+    from labwire.core import AuthorizationRequiredError
+
+    _instrument, server, client = rig
+    with pytest.raises(AuthorizationRequiredError) as refused:
+        await client.submit("irradiate", {"joules": 5.0})
+    assert refused.value.details is not None
+    store = server._grant_store  # pyright: ignore[reportPrivateUsage]
+    assert store is not None
+    grant = store.approve(
+        refused.value.details["request_id"],
+        now=server.clock.now(),
+        ttl=timedelta(minutes=15),
+        max_uses=1,
+    )
+    with pytest.raises(AuthorizationRequiredError) as mismatched:
+        await client.submit("irradiate", {"joules": 9.0}, authorization=grant.grant_id)
+    assert mismatched.value.details is not None
+    assert mismatched.value.details["reason"] == "params_mismatch"
 
 
 async def test_s2_with_the_configured_token_runs(
