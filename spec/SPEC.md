@@ -1,8 +1,8 @@
 # Labwire Protocol Specification
 
-**Version:** 0.2.0 (Draft)
+**Version:** 0.2.1 (Draft)
 **Protocol version string:** `"0.2"`
-**Date:** 2026-07-26
+**Date:** 2026-07-27
 **License:** Apache-2.0
 
 ---
@@ -106,7 +106,7 @@ specifies protocol version `"0.2"`.
   servers SHOULD reply with exactly `"0.2"` if they implement this document.
 
 The specification document itself is versioned `MAJOR.MINOR.PATCH`
-(this document: 0.2.0); PATCH revisions never change the wire protocol.
+(this document: 0.2.1); PATCH revisions never change the wire protocol.
 
 ## 5. Transports
 
@@ -246,16 +246,37 @@ Each entry in `commands`:
   `{"type": "object", "additionalProperties": false}`.
 - `unit_annotations` (object, REQUIRED): maps parameter name → **UCUM
   case-sensitive unit code** (e.g. `"mL/min"`, `"Cel"`, `"g"`, `"V"`).
-  **Every numeric parameter** (JSON Schema type `number` or `integer`) in
-  `params_schema` MUST have an entry; dimensionless quantities MUST use
-  `"1"` (UCUM unity). Commands with no numeric parameters declare `{}`.
-  Non-numeric parameters MAY be annotated but are not required to be.
+  **Every parameter that carries a number MUST have an entry**, and
+  dimensionless quantities MUST use `"1"` (UCUM unity). Commands whose
+  parameters carry no numbers declare `{}`. Non-numeric parameters MAY be
+  annotated but are not required to be.
+
+  A parameter carries a number if a `number` or `integer` can appear
+  anywhere in a conforming instance, not only when the parameter is itself
+  one. In particular this includes arrays of numbers, arrays of arrays,
+  fixed-length tuples (`prefixItems`), mappings whose values are numbers
+  (`additionalProperties`), and any of these reached through `anyOf`,
+  `oneOf`, `allOf`, or a local `$ref` into `$defs`. A `type` given as a list
+  containing `number` or `integer`, and a `const` or `enum` pinning numeric
+  values, also count. The unit belongs to the quantity, not to the container
+  it arrived in: a command taking eight volumes as an array is annotated
+  exactly like a command taking one.
+
+  A parameter whose type is an **object with numeric fields** cannot be
+  annotated under this scheme, because `unit_annotations` is keyed by
+  parameter name and one code cannot describe fields of different kinds.
+  Such a declaration MUST be rejected rather than served unannotated;
+  flatten the fields into separate parameters. Per-path unit annotation is
+  a candidate for a future version.
+
   Servers MUST reject their own malformed declarations at startup rather
   than serve an under-annotated descriptor; clients MAY reject a descriptor
   that violates this rule.
-- `returns_units` (object, REQUIRED): the same mapping for the command's
-  result: every numeric property named in `returns_schema` MUST have a UCUM
-  code. `{}` when the command returns nothing numeric.
+- `returns_units` (object, REQUIRED): the same mapping, under the same
+  definition of carrying a number, for the command's result. A command whose
+  result carries numbers without naming them (a bare number, an array, or a
+  mapping) MUST declare at least one code. `{}` when the command returns
+  nothing numeric.
 - `qudt_quantity_kind` (object, OPTIONAL): maps the same parameter or
   result names to a QUDT `quantityKind` IRI or local name (e.g.
   `"VolumeFlowRate"`), for consumers doing dimensional reasoning.
@@ -1213,6 +1234,17 @@ Labwire, lives in `PRIOR_ART.md` at the repository root.
 
 ## 17. Changelog
 
+- **0.2.1 (2026-07-27):** Corrective. The unit rule in §7.2 said "every
+  numeric parameter (JSON Schema type `number` or `integer`)", which a
+  reference implementation read literally, so an array of numbers carried no
+  obligation and the guarantee that no quantity crosses the wire without a
+  unit was false for every command that passes quantities as arrays. The rule
+  now covers a parameter that carries a number *anywhere* in a conforming
+  instance, and an object parameter with numeric fields, which the scheme
+  cannot annotate, MUST be rejected rather than served. Protocol version
+  stays `"0.2"`: no message shape changed, and a v0.2 descriptor that was
+  correct under the old wording is still correct unless it was relying on the
+  hole.
 - **0.2.0 (2026-07-26):** Protocol version `"0.2"`. **Breaking:**
   `unit_annotations` and `returns_units` are now REQUIRED on every command
   and MUST carry a UCUM code for every numeric parameter and numeric result

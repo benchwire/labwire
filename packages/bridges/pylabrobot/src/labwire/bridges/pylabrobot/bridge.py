@@ -353,6 +353,10 @@ _IMPLEMENTATIONS: dict[str, str] = {
 }
 
 _UNITS: dict[str, dict[str, str]] = {
+    # A channel index is a count, so it is dimensionless rather than unitless:
+    # "1" is the UCUM code that says so out loud.
+    "pick_up_tips": {"channels": "1"},
+    "drop_tips": {"channels": "1"},
     "aspirate": {"volumes_ul": "uL", "flow_rates_ul_s": "uL/s"},
     "dispense": {"volumes_ul": "uL", "flow_rates_ul_s": "uL/s"},
     "transfer": {"volumes_ul": "uL"},

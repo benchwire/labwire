@@ -4,7 +4,34 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
-## Unreleased
+## 0.2.1, 2026-07-27
+
+Protocol version stays `"0.2"`: no message shape changed.
+
+### Fixed
+
+- **The mandatory-unit guarantee was false for arrays.** SPEC §7.2 said
+  "every numeric parameter (JSON Schema type `number` or `integer`)", and the
+  implementation read that literally, so a bare `float` parameter without a
+  unit was refused at declaration time while `list[float]` was accepted
+  silently. Since an eight-channel liquid handler passes every volume as an
+  array, the v0.2 headline promise that no quantity crosses the wire without a
+  unit did not hold for an entire domain. A parameter or result now needs a
+  UCUM code if a number can appear anywhere in a conforming instance:
+  through arrays, nested arrays, fixed-length tuples, mappings, `anyOf`,
+  `oneOf`, `allOf`, and local `$ref`s, and for the `type`-as-list, `const`,
+  and `enum` forms a hand-written descriptor can use. Enforced at declaration
+  time and in wire validation, the same two layers as before. Recorded as
+  finding F5 in [SPEC-FINDINGS.md](SPEC-FINDINGS.md), now resolved.
+- A parameter whose type is an **object with numeric fields** is now rejected
+  rather than served unannotated. `unit_annotations` is keyed by parameter
+  name, so one code cannot describe fields of different kinds; the error names
+  the fields and says to flatten them.
+- Canonicalization (RFC 8785) mishandled numeric types that are not `int` or
+  `float`: a float subclass leaked its own `repr` into the signed bytes
+  (numpy scalars serialized as `np.float64(0.5)`), and numpy integers raised
+  outright. Any instrument publishing numpy values, which every EPICS or
+  ophyd device does, could produce a corrupt or unverifiable manifest.
 
 ### Added
 
@@ -39,14 +66,6 @@ changes are expected until then, and are called out explicitly.
   agent plan the same scan. Verified against `ophyd.sim` devices and a
   caproto soft EPICS IOC over Channel Access, **never against physical
   hardware**; see the package's LIMITATIONS section.
-
-### Fixed
-
-- Canonicalization (RFC 8785) mishandled numeric types that are not `int` or
-  `float`: a float subclass leaked its own `repr` into the signed bytes
-  (numpy scalars serialized as `np.float64(0.5)`), and numpy integers raised
-  outright. Any instrument publishing numpy values, which every EPICS or
-  ophyd device does, could produce a corrupt or unverifiable manifest.
 
 ## 0.2.0, 2026-07-26
 

@@ -55,11 +55,12 @@ the work.
 
 ## Physical typing
 
-- **Unit enforcement that recurses into arrays and nested objects**
-  (finding F5). A `float` parameter with no unit is refused at declaration
-  time; a `list[float]` is accepted silently, which nearly made the v0.2
-  guarantee false for every liquid-handling command. Small fix, and it needs a
-  conformance test whose only numeric parameter is an array.
+- **Per-path unit annotation.** 0.2.1 closed finding F5 by requiring a unit
+  wherever a number can appear, including inside arrays and mappings. One case
+  it could not fix is an object-typed parameter whose fields are quantities of
+  different kinds: `unit_annotations` is keyed by parameter name, so such a
+  declaration is refused rather than served unannotated. Annotating by path
+  would allow it properly.
 - **Full UCUM grammar validation** (currently only presence is enforced):
   either a maintained library or a vendored grammar, with the UCUM test set.
 - **Calibration blocks**: calibration reference and validity window per

@@ -14,8 +14,14 @@ everything that strained, written down while it was straining.
 
 Eight findings. Two are serious enough that a v0.3 which ignored them would be
 a protocol for detectors wearing the clothes of a general standard. Three are
-small and cheap. The last section lists what did *not* strain, which matters
-just as much and is the part a findings document usually leaves out.
+small and cheap, and one of those (F5, a hole in the mandatory-unit guarantee)
+was serious enough to fix immediately and shipped in 0.2.1. The last section
+lists what did *not* strain, which matters just as much and is the part a
+findings document usually leaves out.
+
+Findings are kept here after they are fixed, marked resolved with what
+changed. This file is a record of what the protocol got wrong, not a task
+list; the work itself is scheduled in [ROADMAP.md](ROADMAP.md).
 
 | | Finding | Severity |
 |---|---|---|
@@ -23,7 +29,7 @@ just as much and is the part a findings document usually leaves out.
 | F2 | State that is a tree has nowhere to live | blocking |
 | F3 | Safety class is static when the risk is in the arguments | significant |
 | F4 | S2 and S3 are indistinguishable in enforcement | significant |
-| F5 | Mandatory units do not recurse into arrays | small, cheap |
+| F5 | Mandatory units do not recurse into arrays | **resolved in 0.2.1** |
 | F6 | Operations with no physical consequence have no class | small |
 | F7 | Preconditions are discoverable only by failing | small, cheap |
 | F8 | A command has no point of no return | worth naming |
@@ -232,7 +238,12 @@ silently covers the most dangerous class is the wrong default.
 
 ## F5. Mandatory units do not recurse into arrays
 
-**Severity: small, and the cheapest fix here.**
+**Severity: small, and the cheapest fix here. RESOLVED in 0.2.1.**
+
+> **Resolved 2026-07-27.** The rule in SPEC §7.2 now covers a parameter that
+> carries a number anywhere in a conforming instance, and the implementation
+> matches it at both layers. What changed is at the end of this section; the
+> finding is kept because findings are history, not a task list.
 
 Confirmed by running it, not by reading the code:
 
@@ -256,12 +267,29 @@ quantity crosses the wire without a unit, was inches from being false for the
 entire liquid-handling surface. The bridge annotates its arrays voluntarily;
 nothing made it.
 
-### Recommendation for v0.3
+### What was done, in 0.2.1
 
-Recurse into `items` and into nested `properties` when collecting numeric
-parameters, and add a conformance test built from a command whose only numeric
-parameter is an array. Small change, and it closes a hole in the guarantee the
-version is named for.
+The rule is now about the quantity rather than about the container it arrived
+in. A parameter or result needs a UCUM code if a `number` or `integer` can
+appear anywhere in a conforming instance: through `items`, nested arrays,
+`prefixItems` tuples, `additionalProperties` mappings, `anyOf`/`oneOf`/
+`allOf`, and local `$ref`s into `$defs`. Because a descriptor arriving over
+the wire need not have been written by pydantic, the `type`-as-list, `const`,
+and `enum` spellings of a number count too.
+
+Nested objects went the other way. `unit_annotations` is keyed by parameter
+name, so one code cannot describe an object whose fields are quantities of
+different kinds, and annotating the container would have been a lie. Such a
+declaration is now **refused**, with an error naming the offending fields and
+telling the author to flatten them. Per-path unit annotation is the real fix
+and is a candidate for a later version; refusing is the honest interim.
+
+The repository audit that followed found exactly one violation: `channels`, a
+`list[int]` of pipetting channel indices in the PyLabRobot bridge, now
+annotated `"1"`. Telemetry needed no change, and the reason is worth recording:
+`ChannelSpec` has always required a non-empty unit for every channel regardless
+of dtype, and v0.2 channel dtypes are scalar only, so the hole could not exist
+there.
 
 ---
 

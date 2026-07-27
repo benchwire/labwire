@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-sim"
-version = "0.2.0.dev0"
+version = "0.2.1"
 description = "Labwire simulated instruments: realistic devices speaking native wire protocols"
 readme = "README.md"
 requires-python = ">=3.12"

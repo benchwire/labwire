@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-drivers"
-version = "0.2.0.dev0"
+version = "0.2.1"
 description = "Labwire instrument drivers speaking native wire protocols (SCPI/TCP, serial-style)"
 readme = "README.md"
 requires-python = ">=3.12"
