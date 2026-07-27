@@ -10,11 +10,11 @@ Optional dependencies used by labwire-ophyd
 The ophyd bridge (packages/bridges/ophyd) interoperates with, but does not
 include, modify, or redistribute, the following projects:
 
-  ophyd — Copyright (c) Brookhaven National Laboratory and the Bluesky
+  ophyd - Copyright (c) Brookhaven National Laboratory and the Bluesky
   collaboration. Licensed under the BSD 3-Clause License.
   https://github.com/bluesky/ophyd
 
-  caproto — Copyright (c) Brookhaven National Laboratory and contributors.
+  caproto - Copyright (c) Brookhaven National Laboratory and contributors.
   Licensed under the BSD 3-Clause License. Used only to run a soft EPICS
   IOC in the bridge's tests.
   https://github.com/caproto/caproto
