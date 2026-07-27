@@ -9,7 +9,7 @@ protocol feedback, prior-art corrections, and implementation bug reports.
 ```bash
 git clone https://github.com/benchwire/labwire.git && cd labwire
 make setup    # uv installs Python 3.12 and every workspace package
-make check    # ruff + pyright strict + full test suite — exactly what CI runs
+make check    # ruff + pyright strict + full test suite: exactly what CI runs
 ```
 
 Requirements: [uv](https://docs.astral.sh/uv/) (`curl -LsSf
@@ -20,7 +20,7 @@ uv manages Python itself; no system Python needed.
 
 - **uv workspace, one distribution per `packages/*` directory**, sharing the
   `labwire.*` namespace (PEP 420). Never create `src/labwire/__init__.py` in
-  any package — it would break the shared namespace.
+  any package: it would break the shared namespace.
 - **The spec is the source of truth.** Protocol changes start in
   [spec/SPEC.md](spec/SPEC.md); every JSON example in it is round-tripped
   through the implementation's models in CI, so spec and code cannot drift.

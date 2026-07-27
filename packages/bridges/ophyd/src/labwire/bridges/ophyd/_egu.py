@@ -3,7 +3,7 @@
 EPICS `.EGU` fields are free text: a facility writes whatever its engineers
 type. Labwire v0.2 requires a UCUM code on every quantity, so the bridge
 translates the spellings that are conventional in beamline practice and
-treats everything else as **unresolved** — a human then supplies the code in
+treats everything else as **unresolved**: a human then supplies the code in
 the annotation file. Nothing here guesses.
 
 The mappings are chosen from EPICS convention, not validated against a UCUM
@@ -70,7 +70,7 @@ _EGU_TO_UCUM: dict[str, str] = {
     "MeV": "MeV",
     "J": "J",
     "mJ": "mJ",
-    # temperature — UCUM spells degrees Celsius "Cel"
+    # temperature, UCUM spells degrees Celsius "Cel"
     "C": "Cel",
     "degC": "Cel",
     "deg C": "Cel",

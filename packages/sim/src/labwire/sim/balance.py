@@ -1,6 +1,6 @@
 """Simulated analytical balance with realistic settling behavior.
 
-An original Labwire device model ("SimBalance-120", 120 g capacity) — not an
+An original Labwire device model ("SimBalance-120", 120 g capacity): not an
 emulation of any real vendor's balance or protocol. Serial-style line
 protocol over TCP:
 

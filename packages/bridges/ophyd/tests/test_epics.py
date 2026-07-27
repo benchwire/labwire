@@ -6,7 +6,7 @@ set on its PVs, connects ophyd's EPICS signals to it over Channel Access, and
 proves the thing simulation cannot: that units and control limits are
 **adopted from the device** rather than supplied by hand.
 
-The IOC is pure Python — no EPICS base install — and is bound to localhost on
+The IOC is pure Python: no EPICS base install, and is bound to localhost on
 an ephemeral port so it never touches a real control network.
 """
 

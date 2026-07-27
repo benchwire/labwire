@@ -1,7 +1,7 @@
 """Expose ophyd (Bluesky) devices as Labwire instruments.
 
 ophyd abstracts hardware for Python programmers; Labwire describes hardware
-to AI agents. This bridge composes the two — it does not reimplement drivers.
+to AI agents. This bridge composes the two: it does not reimplement drivers.
 ophyd is an optional dependency: import this package only where it is
 installed.
 

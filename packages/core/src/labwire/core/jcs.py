@@ -68,8 +68,8 @@ def jcs_dumps(value: Any) -> str:
             ]
             return "{" + ",".join(parts) + "}"
         case _:
-            # Numeric types that do not subclass int/float — numpy integers are
-            # the common case in scientific Python — are still real numbers.
+            # Numeric types that do not subclass int/float, numpy integers are
+            # the common case in scientific Python, are still real numbers.
             if hasattr(value, "__index__"):
                 return str(operator.index(cast("SupportsIndex", value)))
             if hasattr(value, "__float__"):
@@ -78,7 +78,7 @@ def jcs_dumps(value: Any) -> str:
 
 
 def jcs_canonical(value: Any) -> bytes:
-    """UTF-8 bytes of the canonical form — the signing/digest input.
+    """UTF-8 bytes of the canonical form: the signing/digest input.
 
     Example:
         >>> jcs_canonical({"v": 1})

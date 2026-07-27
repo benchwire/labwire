@@ -1,7 +1,7 @@
 """Streaming, cancellation, and interlock recovery over a real WebSocket.
 
 The middle-depth example: `quickstart.py` shows the 60-second happy path,
-`demo/` shows a full closed loop — this one shows the operational realities
+`demo/` shows a full closed loop: this one shows the operational realities
 an agent must handle: live telemetry, cancelling a long run, and recovering
 from a tripped safety interlock.
 

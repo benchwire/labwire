@@ -9,7 +9,7 @@ instrument's capabilities, **command** it, **stream** its measurements, and
 walk away with **cryptographically signed** proof of what was done.
 
 > Working title, protocol v0.2 draft. The wire protocol will change before
-> 1.0. Feedback and prior-art corrections are very welcome — see
+> 1.0. Feedback and prior-art corrections are very welcome; see
 > [CONTRIBUTING.md](CONTRIBUTING.md).
 
 <!-- demo GIF goes here once recorded: see docs/demo-gif.md -->
@@ -23,14 +23,14 @@ buildable now:
 
 - **AI-agent-native.** Capability discovery modeled on MCP: an instrument
   describes its commands as JSON Schema, so any agent framework can drive it
-  with zero glue code — the bundled [MCP adapter](packages/mcp) proves it.
+  with zero glue code: the bundled [MCP adapter](packages/mcp) proves it.
 - **Signed results.** Every run can produce an ed25519-signed manifest over
-  the exact telemetry recorded — portable, tamper-evident evidence of what
+  the exact telemetry recorded: portable, tamper-evident evidence of what
   instrument did what, verified by one CLI command.
 - **Safety and physical typing in the protocol.** Mandatory UCUM units on
-  every quantity, S0–S3 safety classes with confirmation required for
+  every quantity, S0-S3 safety classes with confirmation required for
   irreversible or hazardous actions, interlocks, cancellation, and typed
-  errors with retryability — first-class and specified, not vendor add-ons.
+  errors with retryability. All specified in the protocol, not vendor add-ons.
 - **Runnable by a stranger in 5 minutes.** Zero hardware: the reference
   implementation ships three realistic simulated instruments.
 
@@ -44,7 +44,7 @@ uv run examples/streaming.py     # telemetry, cancellation, interlock recovery
 make demo                        # closed-loop optimization + signed evidence
 ```
 
-`make demo` runs a full autonomous experiment campaign — a scripted optimizer
+`make demo` runs a full autonomous experiment campaign: a scripted optimizer
 tunes heater voltage and reagent flow rate across three simulated
 instruments, converges on the hidden yield optimum, and ends by verifying the
 winning run's signed bundle:
@@ -107,8 +107,9 @@ in CI.
 | [labwire-sim](packages/sim) | Three realistic simulated instruments speaking native wire protocols |
 | [labwire-drivers](packages/drivers) | Drivers wrapping those native protocols as Labwire instruments |
 | [labwire-mcp](packages/mcp) | MCP adapter: every instrument command becomes an MCP tool |
-| [labwire-cli](packages/cli) | `labwire verify <bundle>` — authenticate signed run evidence |
+| [labwire-cli](packages/cli) | `labwire verify <bundle>`: authenticate signed run evidence |
 | [labwire-ophyd](packages/bridges/ophyd) | Bridge: serve any ophyd (Bluesky) device as a Labwire instrument |
+| [labwire-pylabrobot](packages/bridges/pylabrobot) | Bridge: serve a PyLabRobot liquid handler as a Labwire instrument |
 | [spec/](spec) | The protocol specification (v0.2 draft) |
 | [examples/](examples) | Quickstart, streaming/recovery, and the closed-loop demo |
 
@@ -146,18 +147,18 @@ uv run labwire-mcp ws://127.0.0.1:9520
 ```
 
 Every declared command appears as an MCP tool with its schema, units, and
-identity — Claude discovers and drives the hardware natively. See
+identity, so Claude discovers and drives the hardware natively. See
 [examples/mcp-config.json](examples/mcp-config.json) for a Claude-style MCP
 server entry.
 
 ## Honesty and scope
 
-The three instruments are **original simulated device models** — realistic
-latency, noise, drift, failure modes, and safety interlocks — but they are
-not emulations of any real vendor's hardware, and **no compatibility with
+The three instruments are **original simulated device models**, with
+realistic latency, noise, drift, failure modes, and safety interlocks. They
+are not emulations of any real vendor's hardware, and **no compatibility with
 real instruments is claimed**. In the closed-loop demo, the chemistry between
 devices is computed by the demo harness. Safety confirmation for S2/S3
-commands proves deployment policy, not operator identity — cryptographic
+commands proves deployment policy, not operator identity; cryptographic
 operator binding is on the [roadmap](ROADMAP.md), not in v0.2. Non-goals for
 now: fleet control, web UI, auth beyond a stub API key, real hardware
 drivers, cloud hosting.
@@ -166,8 +167,9 @@ drivers, cloud hosting.
 
 Labwire does not aim to reimplement thousands of drivers. The
 [ophyd bridge](packages/bridges/ophyd) exposes any classic
-[ophyd](https://github.com/bluesky/ophyd) device — the hardware layer under
-Bluesky, widely used at synchrotron facilities — as a Labwire instrument:
+[ophyd](https://github.com/bluesky/ophyd) device, the hardware layer under
+Bluesky that is widely used at synchrotron facilities, as a Labwire
+instrument:
 
 ```bash
 uv run labwire-ophyd annotate ophyd.sim:motor -o labwire-ophyd.yaml
@@ -178,24 +180,41 @@ ophyd knows a device's structure; it carries no units and no notion of risk.
 A small YAML annotation file supplies those, the bridge refuses to serve a
 device whose quantities have no UCUM unit, and actuation is classified S2 so
 an agent must present an operator confirmation to move anything. Verified
-against simulated devices and a soft EPICS IOC over Channel Access —
+against simulated devices and a soft EPICS IOC over Channel Access,
 **never against physical hardware**; the package's LIMITATIONS section is
 explicit about what that does and does not mean.
 
+The [PyLabRobot bridge](packages/bridges/pylabrobot) does the same for liquid
+handling, and was built to test something specific: ophyd devices are
+*signal-shaped*, which is the shape this protocol was designed around, so
+bridging them proved less than it looked like. A liquid handler's commands act
+on things, and its state is a tree.
+
+```bash
+make demo-pylabrobot     # a serial dilution, with signed evidence
+```
+
+It works, and the places it strained are written down rather than smoothed
+over. [SPEC-FINDINGS.md](SPEC-FINDINGS.md) is an honest list of eight of them,
+with concrete recommendations for v0.3. The short version: v0.2 models actions
+on quantities well and does not yet model things. References cannot be typed
+the way units type numbers, and instrument state that is a tree has nowhere to
+live.
+
 ## Prior art & positioning
 
-Agent-to-instrument protocols became an active space in 2025–2026: **LAP**
+Agent-to-instrument protocols became an active space in 2025-2026: **LAP**
 ([arXiv:2606.03755](https://arxiv.org/abs/2606.03755)) is a thoughtful
 design specification for the same agent-to-instrument edge Labwire targets,
 and **SCP** ([arXiv:2512.24189](https://arxiv.org/abs/2512.24189)) extends
 MCP with a hub-mediated registry deployed at platform scale. Labwire and
 LAP are independent convergent designs, and protocol v0.2 adopts two of
-LAP's ideas — mandatory UCUM unit codes and the S0–S3 safety-class
-taxonomy — with credit. The practical difference today is simple: LAP is a
+LAP's ideas, mandatory UCUM unit codes and the S0-S3 safety-class taxonomy,
+with credit. The practical difference today is simple: LAP is a
 specification without a published implementation, while Labwire is running
-code — spec, SDKs, simulators, signed runs, an MCP adapter, and a
+code, spec, SDKs, simulators, signed runs, an MCP adapter, and a
 five-minute quickstart. [PRIOR_ART.md](PRIOR_ART.md) has the full honest
-comparison — including MCP, SiLA 2, OPC-UA LADS, Bluesky/Ophyd, and
+comparison, including MCP, SiLA 2, OPC-UA LADS, Bluesky/Ophyd, and
 PyLabRobot, and what each does better than Labwire.
 
 ## Development
@@ -209,4 +228,4 @@ and [ROADMAP.md](ROADMAP.md) for what is planned but not built.
 
 ## License
 
-[Apache-2.0](LICENSE) — the patent grant matters for a protocol.
+[Apache-2.0](LICENSE): the patent grant matters for a protocol.

@@ -1,6 +1,6 @@
 """`make demo-ophyd`: scan a simulated beamline rig through Labwire.
 
-Two ordinary ophyd devices — an `ophyd.sim` stage and detector — are exposed
+Two ordinary ophyd devices: an `ophyd.sim` stage and detector, are exposed
 by the bridge as Labwire instruments, with units and safety classes supplied
 by the annotation file. The scan moves the stage across a range, acquires at
 each point, finds the peak, and verifies the signed bundle for the winning

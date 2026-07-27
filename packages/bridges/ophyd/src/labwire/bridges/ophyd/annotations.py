@@ -1,9 +1,9 @@
 """The annotation file: the semantics ophyd never carried.
 
 Introspection (:mod:`labwire.bridges.ophyd.introspect`) gets the mechanical
-80% of a descriptor from an ophyd ``Device``. This module supplies the rest —
+80% of a descriptor from an ophyd ``Device``. This module supplies the rest:
 units where EPICS gave none, safety classes ophyd has no concept of, physical
-limits, human descriptions, intent tags — from a YAML sidecar, and refuses to
+limits, human descriptions, intent tags, from a YAML sidecar, and refuses to
 resolve an instrument whose gaps are still open.
 
 Annotations are keyed by ophyd class (inherited along the MRO, so a subclass
@@ -96,8 +96,8 @@ class ComponentAnnotation(_Strict):
     settable: bool | None = None
     """Force a component read-only (``false``) even though ophyd allows a put.
 
-    Many readbacks are technically writable — a detector's computed value, a
-    readback mirror — but writing to them is meaningless or harmful. Setting
+    Many readbacks are technically writable: a detector's computed value, a
+    readback mirror, but writing to them is meaningless or harmful. Setting
     this to ``false`` keeps the channel and drops its actuation command.
     """
     exclude: bool = False

@@ -70,12 +70,12 @@ _SAFETY_NOTES = {
     "S0": "Safety class S0 (emergency/protective operation; always permitted).",
     "S1": "Safety class S1 (routine, reversible).",
     "S2": (
-        "Safety class S2 (costly or IRREVERSIBLE — e.g. consumes reagent or "
+        "Safety class S2 (costly or IRREVERSIBLE, e.g. consumes reagent or "
         "destroys a sample). Requires a `confirmation` value; supply the "
         "operator-provided confirmation string."
     ),
     "S3": (
-        "Safety class S3 (HAZARDOUS — capable of harming people or equipment). "
+        "Safety class S3 (HAZARDOUS, capable of harming people or equipment). "
         "Requires a `confirmation` value; do not invent one."
     ),
 }

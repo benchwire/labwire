@@ -8,6 +8,26 @@ changes are expected until then, and are called out explicitly.
 
 ### Added
 
+- **`labwire-pylabrobot`**, a bridge exposing a
+  [PyLabRobot](https://github.com/PyLabRobot/pylabrobot) liquid handler as a
+  Labwire instrument
+  ([packages/bridges/pylabrobot](packages/bridges/pylabrobot)): an address
+  grammar (`"plate/A1"`) mapping JSON to PyLabRobot's live resource objects, a
+  deck projection that turns 133 KB of raw serialization into under 8 KB an
+  agent can plan with, an optional annotation file describing what labware
+  holds, and a runtime serving ten operations with every material-moving one
+  classified S2. `make demo-pylabrobot` runs a two-fold serial dilution and
+  verifies the signed bundle; `make demo-pylabrobot-claude` has a Claude agent
+  read the deck and plan the same series. Exercised only against PyLabRobot's
+  hardware-free chatterbox backend, **never against physical hardware**; see
+  the package's LIMITATIONS section.
+- **[SPEC-FINDINGS.md](SPEC-FINDINGS.md)**, an honest account of the eight
+  places protocol v0.2 strained against a domain it was not designed for, with
+  recommendations for v0.3. Two are blocking: resource references cannot be
+  typed the way UCUM units type numbers, and instrument state that is a tree
+  has nowhere to live. It also records what did not strain, which is most of
+  the protocol.
+
 - **`labwire-ophyd`**, a bridge exposing [ophyd](https://github.com/bluesky/ophyd)
   devices as Labwire instruments
   ([packages/bridges/ophyd](packages/bridges/ophyd)): introspection of a
@@ -17,7 +37,7 @@ changes are expected until then, and are called out explicitly.
   protocol. `make demo-ophyd` scans a simulated beamline rig for a detector
   peak and verifies the signed bundle; `make demo-ophyd-claude` has a Claude
   agent plan the same scan. Verified against `ophyd.sim` devices and a
-  caproto soft EPICS IOC over Channel Access — **never against physical
+  caproto soft EPICS IOC over Channel Access, **never against physical
   hardware**; see the package's LIMITATIONS section.
 
 ### Fixed
@@ -25,10 +45,10 @@ changes are expected until then, and are called out explicitly.
 - Canonicalization (RFC 8785) mishandled numeric types that are not `int` or
   `float`: a float subclass leaked its own `repr` into the signed bytes
   (numpy scalars serialized as `np.float64(0.5)`), and numpy integers raised
-  outright. Any instrument publishing numpy values — which every EPICS or
-  ophyd device does — could produce a corrupt or unverifiable manifest.
+  outright. Any instrument publishing numpy values, which every EPICS or
+  ophyd device does, could produce a corrupt or unverifiable manifest.
 
-## 0.2.0 — 2026-07-26
+## 0.2.0, 2026-07-26
 
 Physical typing and safety classification, adopted from
 [LAP](https://arxiv.org/abs/2606.03755) with credit (see
@@ -38,7 +58,7 @@ Physical typing and safety classification, adopted from
 
 - **UCUM unit codes are mandatory.** Every numeric command parameter needs
   an entry in `unit_annotations`, every named numeric result field an entry
-  in the new `returns_units`, and every channel a non-empty `unit` — with
+  in the new `returns_units`, and every channel a non-empty `unit`: with
   `"1"` for dimensionless quantities. Enforced as a `TypeError` at
   declaration time and as model validation on the wire, so an under-annotated
   descriptor is rejected rather than guessed at. Commands returning unnamed
@@ -50,7 +70,7 @@ Physical typing and safety classification, adopted from
 
 ### Added
 
-- **Safety classes `S0`–`S3`** on every command (default `S1`, SPEC §8.6).
+- **Safety classes `S0`-`S3`** on every command (default `S1`, SPEC §8.6).
   Servers reject `S2`/`S3` submissions without an acceptable `confirmation`
   using the new error `-32009` (`confirmation_required`), checked after
   schema validation and before interlock and capacity checks. `S0` commands
@@ -76,7 +96,7 @@ Physical typing and safety classification, adopted from
   confirmation as an audit control (SPEC §13).
 - Unit codes are validated for presence, not UCUM grammar.
 
-## 0.1.0 — 2026-07-23
+## 0.1.0, 2026-07-23
 
 Initial release: protocol specification, server and client SDKs
 (WebSocket + in-memory transports), three simulated instruments with

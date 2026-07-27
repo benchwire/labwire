@@ -1,8 +1,8 @@
 """Serve a live ophyd Device through the Labwire protocol.
 
 :func:`OphydInstrument` builds a real :class:`labwire.core.Instrument`
-subclass from a resolved descriptor, so every v0.2 rule — mandatory UCUM
-units, safety-class confirmation, the command lifecycle — applies to a
+subclass from a resolved descriptor, so every v0.2 rule, mandatory UCUM
+units, safety-class confirmation, the command lifecycle, applies to a
 bridged device exactly as it does to a native one. An under-annotated device
 cannot be constructed at all.
 
@@ -301,7 +301,7 @@ def OphydInstrument(
     """Build a Labwire instrument backed by a live ophyd device.
 
     The device is introspected, merged with ``annotations``, and refused
-    outright if any quantity still lacks a UCUM unit — the same rule the
+    outright if any quantity still lacks a UCUM unit: the same rule the
     protocol applies to native instruments.
 
     Example:

@@ -124,7 +124,7 @@ def test_dtype_maps_to_labwire_dtypes() -> None:
     assert draft.component("rig_stage_x").dtype == "float64"
     axis = introspect(SynAxis(name="ax"))
     # ophyd infers dtype from the current value, so an axis resting at int 0
-    # reports "integer" — recorded faithfully, overridable by annotation later
+    # reports "integer", recorded faithfully, overridable by annotation later
     assert axis.component("ax").dtype in {"float64", "int64"}
 
 

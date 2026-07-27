@@ -323,7 +323,7 @@ def test_jcs_number_formatting_matches_rfc8785() -> None:
 # never runs at all. That is the shape of the M2 review finding, where an
 # interlock cancelled a not-yet-started task and left its capacity slot
 # occupied forever. Reproducing it means cancelling within the same event-loop
-# iteration that created the task, which no client-side timing can do — hence
+# iteration that created the task, which no client-side timing can do, hence
 # the fixture below.
 
 
@@ -336,7 +336,7 @@ def _kill_next_run(
     """Make the next command task die before it can take its first step.
 
     Optionally recording a fault against the run first, the way an interlock
-    trip does — the ordering matters, since a fault noticed after the reap
+    trip does: the ordering matters, since a fault noticed after the reap
     has already run would be too late to be reported.
     """
     real_create_task = asyncio.create_task
@@ -376,7 +376,7 @@ async def test_a_stillborn_run_with_a_recorded_fault_is_reported_failed(
     wired: tuple[Doser, InstrumentServer, LabwireClient],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Killed carrying a fault — an interlock trip — it reports that fault."""
+    """Killed carrying a fault: an interlock trip: it reports that fault."""
     _dosed, server, client = wired
     _kill_next_run(monkeypatch, server, fault=InterlockError("spill detected"))
     handle = await client.submit("hold", {})

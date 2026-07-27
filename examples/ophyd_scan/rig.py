@@ -2,7 +2,7 @@
 
 A sample stage (``ophyd.sim.SynAxis``) and a point detector
 (``ophyd.sim.SynGauss``) whose response peaks at a hidden stage position.
-Both are ordinary ophyd devices — the kind a beamline already has — exposed
+Both are ordinary ophyd devices: the kind a beamline already has, exposed
 through the Labwire protocol by the bridge, using the annotation file beside
 this module for the units and safety classes ophyd does not carry.
 """

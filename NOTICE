@@ -21,3 +21,17 @@ include, modify, or redistribute, the following projects:
 
 Both are installed from PyPI as ordinary dependencies; no source from either
 project appears in this repository.
+
+--------------------------------------------------------------------------
+Optional dependencies used by labwire-pylabrobot
+
+The PyLabRobot bridge (packages/bridges/pylabrobot) interoperates with, but
+does not include, modify, or redistribute, the following project:
+
+  PyLabRobot - Copyright (c) 2018 dgretton and contributors, Sculpting
+  Evolution group, MIT Media Lab. Licensed under the MIT License.
+  https://github.com/PyLabRobot/pylabrobot
+
+It is installed from PyPI as an ordinary dependency; no source from it appears
+in this repository. The project asks to be cited as Wierenga, Golas, Ho,
+Coley, and Esvelt, Device (2023), doi:10.1016/j.device.2023.100111.

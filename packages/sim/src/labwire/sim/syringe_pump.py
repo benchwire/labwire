@@ -1,6 +1,6 @@
 """Simulated syringe pump speaking a serial-style line protocol over TCP.
 
-An original Labwire device model ("SimPump-200") — not an emulation of any
+An original Labwire device model ("SimPump-200"): not an emulation of any
 real vendor's pump. The protocol is newline-terminated ASCII, in the style
 of bench serial pumps:
 

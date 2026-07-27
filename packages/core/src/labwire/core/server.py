@@ -183,7 +183,7 @@ class TelemetryChannel:
 
         Sequence numbers increment by exactly 1 per produced sample
         (SPEC §9.2), whether or not anyone is subscribed. Values that
-        violate the channel's dtype — including non-finite floats — are
+        violate the channel's dtype, including non-finite floats, are
         suppressed and reported as an ``error/occurred`` event (SPEC §7.3);
         they are never produced, so they consume no sequence number.
 
@@ -372,7 +372,7 @@ def command[**P, R](
 
     The decorated method keeps its exact signature for direct calls; its
     parameters (after ``self`` and ``ctx``) become the command's
-    ``params_schema`` via pydantic, with unknown params **rejected** — an
+    ``params_schema`` via pydantic, with unknown params **rejected**: an
     agent's typo'd parameter must fail loudly, never silently default.
     ``name`` overrides the wire name (needed for ``x-<vendor>/...``
     extension commands, which are not valid Python identifiers). A
@@ -420,7 +420,7 @@ def command[**P, R](
         resolved_description = description or inspect.getdoc(fn) or ""
         if not resolved_description:
             raise TypeError(
-                f"command {fn.__name__!r} needs a docstring or description= — "
+                f"command {fn.__name__!r} needs a docstring or description=, "
                 "agents decide when to use a command from its description"
             )
         try:
@@ -539,7 +539,7 @@ def _pydantic_error_details(exc: PydanticValidationError) -> list[dict[str, str]
 
 
 class RunRecord(BaseModel):
-    """Immutable public record of one run — the M4 manifest's raw material.
+    """Immutable public record of one run: the M4 manifest's raw material.
 
     Example:
         >>> # server.run_records["<command_id>"].status
@@ -930,7 +930,7 @@ class InstrumentServer:
 
         Deployment policy: with a token configured the value must match it;
         without one, any non-empty value is accepted. Either way this proves
-        deployment policy, not operator identity — see SPEC §13.
+        deployment policy, not operator identity, see SPEC §13.
         """
         if confirmation is None or not confirmation.strip():
             return False
@@ -989,7 +989,7 @@ class InstrumentServer:
                 self._finish(run, "succeeded")
 
     def _cancel_terminal(self, run: _Run) -> None:
-        # SPEC §8.1: `canceled` is reachable only from `canceling` — a
+        # SPEC §8.1: `canceled` is reachable only from `canceling`: a
         # spontaneous CanceledError from `running` interposes the transition.
         if not run.is_canceling():
             self._transition(run, "canceling")
@@ -1162,7 +1162,7 @@ class InstrumentServer:
             for run in self._active_runs():
                 run.fail_reason = InterlockError(f"interlock tripped: {lock.name}")
                 if run.status == "accepted":
-                    # SPEC §8.5: fail synchronously — cancelling a not-yet-started
+                    # SPEC §8.5: fail synchronously, cancelling a not-yet-started
                     # task would skip _execute entirely and leak the slot forever.
                     run.error = run.fail_reason.to_wire()
                     run.timestamps.setdefault("started", rfc3339(self.clock.now()))

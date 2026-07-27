@@ -20,7 +20,7 @@ signable. ophyd is an **optional dependency**, never vendored or modified
 |---|---|
 | `Device.name` | `IdentityInfo.serial_number` (model = class name, manufacturer = "ophyd bridge (Labwire)", firmware = the ophyd version) |
 | `Kind.hinted` (5) / `Kind.normal` (1) | telemetry channel, plus a setter if settable (see below) |
-| `Kind.config` (2) | descriptor metadata only — never a settable command |
+| `Kind.config` (2) | descriptor metadata only, never a settable command |
 | `Kind.omitted` (0) | skipped entirely |
 | `describe()[key]["units"]` | UCUM unit, after EGU translation (§ Units) |
 | `lower_ctrl_limit` / `upper_ctrl_limit` | JSON Schema `minimum` / `maximum` on the set parameter |
@@ -35,7 +35,7 @@ signable. ophyd is an **optional dependency**, never vendored or modified
 
 ### Positioners are moved, not poked
 
-If the device itself is settable — `SynAxis` and every ophyd positioner —
+If the device itself is settable (`SynAxis` and every ophyd positioner),
 the bridge exposes a single `move` command backed by `device.set()`, and
 exposes **no** per-signal setters. This is a correctness matter, not taste:
 a put to a positioner's `setpoint` signal returns a status that completes
@@ -48,7 +48,7 @@ settable channel instead.
 ### Naming
 
 ophyd flattens data keys as `{device.name}_{attr}`, except that a
-positioner's primary readback takes the bare device name — `SynAxis(name="ax")`
+positioner's primary readback takes the bare device name, `SynAxis(name="ax")`
 produces the key `ax`, not `ax_readback`. The bridge uses ophyd's own keys as
 channel names so that data recorded through Labwire and through Bluesky line
 up. Note that ophyd also reserves some attribute names (`position` among
@@ -57,10 +57,10 @@ them) for the bluesky interface and refuses them as component names.
 ## Units (the first hard problem)
 
 Labwire v0.2 requires a UCUM code on every quantity. ophyd's `describe()`
-surfaces `units` **only for EPICS-backed signals** — `EpicsSignalBase.describe()`
-adds `units`, `lower_ctrl_limit`, `upper_ctrl_limit`, `precision`, and
-`enum_strs` — and even then the value is a free-text EGU string that carries
-no guarantee of being valid UCUM.
+surfaces `units` **only for EPICS-backed signals**, where
+`EpicsSignalBase.describe()` adds `units`, `lower_ctrl_limit`,
+`upper_ctrl_limit`, `precision`, and `enum_strs`. Even then the value is a
+free-text EGU string that carries no guarantee of being valid UCUM.
 
 Resolution, in order, with no silent defaults:
 
@@ -73,7 +73,7 @@ Resolution, in order, with no silent defaults:
    component name; the instrument is refused unless `--allow-partial` omits
    the offending signals, each of them reported.
 
-A blank EGU — the commonest EPICS case — is treated as *absent*, never as
+A blank EGU, which is the commonest EPICS case, is treated as *absent*, never as
 `"1"`. Dimensionless is only ever asserted by a human in the annotation file.
 
 **Proven over Channel Access.** `ophyd.sim` devices carry no `units` key at
@@ -88,7 +88,7 @@ Channel Access using caproto's control layer, and asserts that:
 - control limits `(-25, 25)` are adopted from the IOC,
 - an EPICS device with units needs **no annotations at all**,
 - a read-only PV (`EpicsSignalRO`) is given no actuation command,
-- and the whole path — discover, read, actuate — works end to end through
+- and the whole path (discover, read, actuate) works end to end through
   Labwire.
 
 This is what separates "wraps ophyd objects" from "speaks to an actual EPICS

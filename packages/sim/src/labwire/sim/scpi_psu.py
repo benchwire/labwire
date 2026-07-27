@@ -1,6 +1,6 @@
 """Simulated bench power supply speaking SCPI-style commands over TCP.
 
-An original Labwire device model ("SimPSU-3005", 30 V / 5 A) — not an
+An original Labwire device model ("SimPSU-3005", 30 V / 5 A): not an
 emulation of any real vendor's supply. The command set follows generic SCPI
 conventions (every command gets a reply line, for lockstep framing):
 

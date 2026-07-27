@@ -1,7 +1,7 @@
 """`make demo`: a scripted optimizer closes the loop over three instruments.
 
 Optimizes reaction yield over heater voltage (temperature) and reagent flow
-rate using the simulated power supply, syringe pump, and balance — live
+rate using the simulated power supply, syringe pump, and balance, live
 telemetry over real WebSocket connections, ending with an ed25519-signed
 results bundle verified on the spot.
 

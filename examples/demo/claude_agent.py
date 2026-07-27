@@ -1,8 +1,9 @@
 """`make demo-claude`: a real Claude agent closes the loop over the instruments.
 
 Claude discovers the instruments' commands as tools (the same mapping the
-MCP adapter uses), plans its own experiments, and optimizes the reaction —
-every action going through the Labwire protocol. Requires ANTHROPIC_API_KEY;
+MCP adapter uses), plans its own experiments, and optimizes the reaction,
+with every action going through the Labwire protocol. Requires
+ANTHROPIC_API_KEY;
 without it, this degrades gracefully to the scripted optimizer.
 
 Run:
@@ -44,7 +45,7 @@ Procedure for ONE experiment:
 2. pump_dispense with volume_ul={DISPENSE_UL} and your chosen rate_ul_min \
 (allowed {RATE_RANGE[0]}-{RATE_RANGE[1]}). This command is safety class S2 \
 (irreversible: it consumes reagent), so it also needs \
-confirmation="{STANDING_GRANT}" — the standing grant the operator issued for \
+confirmation="{STANDING_GRANT}": the standing grant the operator issued for \
 this session.
 3. balance_measure to weigh the product (the harness collects it onto the balance)
 

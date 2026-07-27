@@ -1,7 +1,7 @@
 """`make demo-ophyd-claude`: a Claude agent scans a simulated beamline rig.
 
-The agent discovers two ordinary ophyd devices as tools — with the UCUM units
-and safety classes the annotation file supplies — plans its own scan, and
+The agent discovers two ordinary ophyd devices as tools, with the UCUM units
+and safety classes the annotation file supplies, plans its own scan, and
 must present the operator's confirmation for every S2 stage move. Requires
 ANTHROPIC_API_KEY; without one it falls back to the scripted scan.
 
@@ -33,7 +33,7 @@ Method: move the stage, then trigger the detector to acquire a reading at that \
 position. Repeat, narrowing in on the peak. Budget: at most 12 acquisitions.
 
 Safety: every tool tells you its safety class. Moving the stage is class S2 because it \
-displaces the sample, so those calls require confirmation="{STANDING_GRANT}" — the \
+displaces the sample, so those calls require confirmation="{STANDING_GRANT}": the \
 standing grant this session's operator issued. Acquisition is S1 and needs no \
 confirmation. Never invent a confirmation value for anything else.
 

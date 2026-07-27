@@ -28,7 +28,7 @@ def verify(bundle: Path) -> None:
     """Verify a signed run bundle (a directory with manifest.json, or the file itself).
 
     Checks the ed25519 signature over the JCS-canonicalized manifest, the
-    signer key_id, and — when records.jsonl is present — recomputes the
+    signer key_id, and, when records.jsonl is present, recomputes the
     record-stream digest (SPEC §12.2). Exits 0 when authentic, 1 otherwise.
     """
     outcome = verify_bundle(bundle)

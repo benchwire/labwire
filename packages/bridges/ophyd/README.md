@@ -2,7 +2,7 @@
 
 **Expose any [ophyd](https://github.com/bluesky/ophyd) device as a Labwire
 instrument**, so AI agents can discover and drive the largest existing body
-of Python instrument drivers through one protocol — with the units, safety
+of Python instrument drivers through one protocol, with the units, safety
 classes, and signed results ophyd itself does not carry.
 
 ophyd abstracts hardware *for Python programmers*. Labwire describes hardware
@@ -25,7 +25,7 @@ uv run labwire-ophyd check ophyd.sim:motor --annotations labwire-ophyd.yaml
 make demo-ophyd
 ```
 
-`labwire-ophyd check` prints the resolved instrument — every channel with its
+`labwire-ophyd check` prints the resolved instrument: every channel with its
 UCUM unit, every command with its safety class:
 
 ```
@@ -92,8 +92,8 @@ Rules worth knowing:
   still reports every one.
 - Annotated `limits` **intersect** with the device's own control limits: the
   tightest bound on each side wins.
-- `settable: false` keeps a channel but removes its actuation command — for
-  readings ophyd technically lets you write, such as a detector's computed
+- `settable: false` keeps a channel but removes its actuation command, for
+  the readings ophyd technically lets you write, such as a detector's computed
   value.
 
 A working example lives at
@@ -120,7 +120,7 @@ Safety defaults lean toward friction, because ophyd carries no safety
 information and guessing low is the failure that moves hardware: actuation is
 S2 (an agent must present an operator confirmation), acquisition is S1, and
 `stop` is S0 so recovery stays available even while an interlock is tripped.
-Changing a class takes an explicit annotation — never a heuristic.
+Changing a class takes an explicit annotation, never a heuristic.
 
 [DESIGN.md](DESIGN.md) has the full reasoning, including why positioners are
 moved rather than poked.
@@ -143,8 +143,8 @@ Read this before believing anything above.
   `ophyd.sim` axis ignores `stop()` and still arrives at its target.
 - **ophyd is synchronous.** Every call runs in a worker thread, so the server
   keeps answering, but a badly behaved device still occupies a thread.
-- **Array- and enum-valued signals are refused** — Labwire v0.2 channels
-  carry scalars — and non-numeric channels still need an explicit unit.
+- **Array- and enum-valued signals are refused**: Labwire v0.2 channels
+  carry scalars, and non-numeric channels still need an explicit unit.
 - **Move progress is not reported.** `MoveStatus.watch()` yields no useful
   intermediate fractions on simulated devices, so the bridge does not
   fabricate one.

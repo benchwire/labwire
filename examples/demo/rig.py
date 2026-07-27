@@ -4,7 +4,7 @@ A simulated flow reaction: the power supply drives a heater (voltage sets
 reactor temperature), the syringe pump feeds reagent (flow rate sets
 residence time), and the analytical balance weighs the product collected.
 Yield peaks at a hidden optimum; the demo harness computes the chemistry
-between devices — placing product mass on the balance after each dispense —
+between devices, placing product mass on the balance after each dispense,
 while every device interaction goes through the real Labwire protocol over
 WebSocket.
 """
@@ -22,8 +22,8 @@ from labwire.sim import ScaledClock, SimBalance, SimPowerSupply, SimSyringePump
 DISPENSE_UL = 40.0
 # The pump's dispense is safety class S2 (irreversible: it consumes reagent), so
 # every submission needs an operator confirmation (SPEC §8.6). A long-running
-# campaign uses a standing grant — one token the operator issues for the whole
-# session — rather than confirming each of a dozen runs by hand.
+# campaign uses a standing grant: one token the operator issues for the whole
+# session, rather than confirming each of a dozen runs by hand.
 STANDING_GRANT = "operator-standing-grant-demo"
 VOLT_RANGE = (5.0, 25.0)
 RATE_RANGE = (80.0, 240.0)
@@ -128,7 +128,7 @@ class DemoRig:
         return await handle.result(timeout=120.0)
 
     async def run_experiment(self, *, volts: float, rate_ul_min: float) -> ExperimentResult:
-        """One iteration: heat, dispense, react, weigh — all over the wire.
+        """One iteration: heat, dispense, react, weigh: all over the wire.
 
         Example:
             >>> # result = await rig.run_experiment(volts=14.0, rate_ul_min=120.0)
