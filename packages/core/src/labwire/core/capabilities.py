@@ -214,6 +214,7 @@ def _walk(
     opaque: set[str],
     units: dict[str, str | None],
     claimed: list[tuple[str, str, dict[str, Any]]],
+    inherited_unit: str | None = None,
 ) -> None:
     """Record every path at which a number may appear, or which cannot be read."""
     if node is False:
@@ -233,7 +234,7 @@ def _walk(
 
     if _declares_number(resolved):
         numeric.add(path)
-        declared_unit = resolved.get("unit")
+        declared_unit = resolved.get("unit", inherited_unit)
         if path not in units or units[path] is None:
             units[path] = declared_unit if isinstance(declared_unit, str) else None
     for keyword in _CLAIMED_KEYWORDS:
@@ -245,13 +246,37 @@ def _walk(
         opaque.add(path)  # an unconstrained node permits a number
         return
 
+    own_unit = resolved.get("unit")
+    branch_unit = own_unit if isinstance(own_unit, str) else inherited_unit
     for key in _BRANCH_KEYS:
         member = resolved.get(key)
         if isinstance(member, list):
             for raw in cast("list[Any]", member):
-                _walk(raw, root, path, depth + 1, seen, numeric, opaque, units, claimed)
+                _walk(
+                    raw,
+                    root,
+                    path,
+                    depth + 1,
+                    seen,
+                    numeric,
+                    opaque,
+                    units,
+                    claimed,
+                    branch_unit,
+                )
         elif member is not None:
-            _walk(member, root, path, depth + 1, seen, numeric, opaque, units, claimed)
+            _walk(
+                member,
+                root,
+                path,
+                depth + 1,
+                seen,
+                numeric,
+                opaque,
+                units,
+                claimed,
+                branch_unit,
+            )
 
     for key in _NAMED_KEYS:
         members = _dict(resolved.get(key))

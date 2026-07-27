@@ -125,6 +125,21 @@ Changing a class takes an explicit annotation, never a heuristic.
 [DESIGN.md](DESIGN.md) has the full reasoning, including why positioners are
 moved rather than poked.
 
+## Why this bridge declares no resources
+
+Protocol v0.3 added resources for instrument state that is a tree with
+nowhere else to live. An ophyd device has none: its structure is fixed by
+its class and is already fully expressed as the descriptor plus scalar
+channels, so inventing a resource here would be adding surface to prove a
+point. The bridge declares `resources: []`, which costs a signal-shaped
+instrument exactly nothing, and that asymmetry is useful evidence about the
+primitive itself.
+
+One v0.3 change does reach this bridge: a `CommandAnnotation.safety_class`
+of `S3` now genuinely bites. An S3 command requires an operator grant from
+a server-side store (`labwire grant`), and a server with S3 commands and no
+store refuses to start; see SPEC 8.6 before raising a command's class.
+
 ## LIMITATIONS
 
 Read this before believing anything above.

@@ -22,8 +22,9 @@ Example:
 import enum
 from typing import Any
 
-from labwire.bridges.pylabrobot.addressing import address_of
+from labwire.bridges.pylabrobot.addressing import uri_of
 from labwire.core import IdentityInfo, SafetyClass
+from labwire.core.server import unit_field
 from pydantic import BaseModel, ConfigDict
 
 _CATEGORY_KINDS = {
@@ -34,8 +35,22 @@ _CATEGORY_KINDS = {
     "carrier": "carrier",
     "plate_carrier": "carrier",
     "tip_carrier": "carrier",
+    "plate_holder": "site",
     "deck": "deck",
 }
+
+KIND_SETS: dict[str, list[str]] = {
+    # SPEC Appendix A: an index entry lists every kind it satisfies, most
+    # specific first, so a reference declaring any of them resolves to it.
+    "plate": ["plate", "labware"],
+    "tip_rack": ["tip_rack", "labware"],
+    "trough": ["trough", "container", "labware"],
+    "trash": ["trash", "labware"],
+    "site": ["site"],
+    "carrier": ["labware"],
+}
+"""Registered kind arrays per bridge classification; OTHER maps to none and
+is deliberately not referenceable."""
 
 
 class LabwareKind(enum.StrEnum):
@@ -46,9 +61,19 @@ class LabwareKind(enum.StrEnum):
     TROUGH = "trough"
     TRASH = "trash"
     CARRIER = "carrier"
+    SITE = "site"
     DECK = "deck"
     OTHER = "other"
-    """Recognized as present and addressable, but of unknown purpose."""
+    """Recognized as present, but of unknown purpose and not referenceable."""
+
+    def kinds(self) -> list[str]:
+        """The registered kind array this classification satisfies.
+
+        Example:
+            >>> LabwareKind.TROUGH.kinds()
+            ['trough', 'container', 'labware']
+        """
+        return list(KIND_SETS.get(self.value, []))
 
 
 class UnresolvedReason(enum.StrEnum):
@@ -72,9 +97,9 @@ class Grid(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    rows: int
-    columns: int
-    item_max_volume_ul: float | None = None
+    rows: int = unit_field("1")
+    columns: int = unit_field("1")
+    item_max_volume_ul: float | None = unit_field("uL", default=None)
 
     @property
     def item_count(self) -> int:
@@ -91,14 +116,14 @@ class DraftLabware(BaseModel):
     """One addressable piece of labware on the deck.
 
     Example:
-        >>> # draft.labware[0].address
-        >>> # 'source_plate'
+        >>> # draft.labware[0].uri
+        >>> # 'labwire:deck/source_plate'
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    address: str
-    """The name this labware is addressed by (also its PyLabRobot name)."""
+    uri: str
+    """The labware's deck URI, ``labwire:deck/<name>`` (SPEC §10.1)."""
     kind: LabwareKind
     type_name: str
     """The PyLabRobot class, e.g. ``Plate``."""
@@ -132,7 +157,7 @@ class Unresolved(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    address: str
+    uri: str
     reason: UnresolvedReason
     message: str
 
@@ -162,16 +187,16 @@ class DraftInstrument(BaseModel):
         """
         return not self.unresolved
 
-    def find(self, address: str) -> DraftLabware:
-        """Look up labware by address.
+    def find(self, uri: str) -> DraftLabware:
+        """Look up labware by URI.
 
         Example:
-            >>> # draft.find("source_plate").kind
+            >>> # draft.find("labwire:deck/source_plate").kind
         """
         for candidate in self.labware:
-            if candidate.address == address:
+            if candidate.uri == uri:
                 return candidate
-        raise KeyError(f"no such labware: {address!r}")
+        raise KeyError(f"no such labware: {uri!r}")
 
 
 def _pylabrobot_version() -> str:
@@ -235,7 +260,7 @@ def addressable_resources(root: Any) -> list[Any]:
 
 
 def _describe_labware(resource: Any) -> tuple[DraftLabware, list[Unresolved]]:
-    address = address_of(resource)
+    uri = uri_of(resource)
     kind = _kind_of(resource)
     grid = _grid_of(resource)
     try:
@@ -247,10 +272,10 @@ def _describe_labware(resource: Any) -> tuple[DraftLabware, list[Unresolved]]:
     if kind is LabwareKind.OTHER:
         gaps.append(
             Unresolved(
-                address=address,
+                uri=uri,
                 reason=UnresolvedReason.UNKNOWN_KIND,
                 message=(
-                    f"{address!r} is a {type(resource).__name__} with category "
+                    f"{uri!r} is a {type(resource).__name__} with category "
                     f"{getattr(resource, 'category', None)!r}, which the bridge does not "
                     "recognize; it stays addressable but its purpose is not described"
                 ),
@@ -259,10 +284,10 @@ def _describe_labware(resource: Any) -> tuple[DraftLabware, list[Unresolved]]:
     if location is None:
         gaps.append(
             Unresolved(
-                address=address,
+                uri=uri,
                 reason=UnresolvedReason.NO_LOCATION,
                 message=(
-                    f"{address!r} has no location on the deck, so an agent cannot reason "
+                    f"{uri!r} has no location on the deck, so an agent cannot reason "
                     "about where it is; assign it before serving"
                 ),
             )
@@ -270,17 +295,17 @@ def _describe_labware(resource: Any) -> tuple[DraftLabware, list[Unresolved]]:
     if grid is not None and grid.item_max_volume_ul is None and kind is not LabwareKind.TIP_RACK:
         gaps.append(
             Unresolved(
-                address=address,
+                uri=uri,
                 reason=UnresolvedReason.NO_CAPACITY,
                 message=(
-                    f"{address!r} has {grid.item_count} items that report no maximum volume, "
+                    f"{uri!r} has {grid.item_count} items that report no maximum volume, "
                     "so overfilling cannot be caught before it happens"
                 ),
             )
         )
 
     labware = DraftLabware(
-        address=address,
+        uri=uri,
         kind=kind,
         type_name=type(resource).__name__,
         model=getattr(resource, "model", None),
@@ -301,22 +326,15 @@ def command_surface() -> list[DraftCommand]:
     Fixed rather than derived, unlike the ophyd bridge: PyLabRobot's frontend
     is one class with one set of operations, so there is nothing to discover.
     Safety classes follow ``DESIGN.md``: anything that moves or consumes
-    material is S2, reads are S0, and ``stop`` is S0 so recovery stays
-    available while an interlock is tripped.
+    material is S2, and ``stop`` is S0 so recovery stays available while an
+    interlock is tripped. There is no ``describe_deck``: the deck is the
+    ``labwire:deck`` resource now (SPEC §10), read rather than commanded.
 
     Example:
         >>> next(c.safety_class for c in command_surface() if c.name == "aspirate")
         'S2'
     """
     return [
-        DraftCommand(
-            name="describe_deck",
-            description=(
-                "List the labware on the deck, the state of each pipetting channel, and "
-                "the volume of every well known to hold liquid."
-            ),
-            safety_class="S0",
-        ),
         DraftCommand(
             name="pick_up_tips",
             description="Pick up tips from the given tip spots onto the pipetting channels.",

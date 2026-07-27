@@ -114,10 +114,10 @@ def dilution_wells(steps: int) -> list[str]:
     """Addresses of the dilution series, across row A of the dilution plate.
 
     Example:
-        >>> dilution_wells(3)
-        ['dilution_plate/A1', 'dilution_plate/A2', 'dilution_plate/A3']
+        >>> dilution_wells(2)
+        ['labwire:deck/dilution_plate/A1', 'labwire:deck/dilution_plate/A2']
     """
-    return [f"dilution_plate/A{index + 1}" for index in range(steps)]
+    return [f"labwire:deck/dilution_plate/A{index + 1}" for index in range(steps)]
 
 
 def demo_steps() -> int:

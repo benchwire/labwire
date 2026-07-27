@@ -21,19 +21,20 @@ three sections: ``instrument``, ``commands``, and ``resources`` (with
     labware:
       Cor_96_wellplate_360ul_Fb: {description: A 96-well Costar plate.}
     resources:
-      acid_stock:
+      labwire:deck/acid_stock:
         description: 1 M hydrochloric acid.
         hazard: corrosive
-        safety_class: S3
         locked: true
 
-**Read this before trusting ``safety_class`` here.** Raising a resource to S3
-changes what the bridge reports and records; it does not change what the
-protocol enforces, because Labwire v0.2 gates S2 and S3 through the same
-confirmation stub and its ``safety_class`` is a static property of a command
-rather than a function of that command's arguments. ``locked`` is the part
-that is genuinely enforced: a locked resource refuses every operation that
-touches it. See ``SPEC-FINDINGS.md``.
+There is no per-resource ``safety_class`` any more. It was documented in
+three places as reported-but-not-enforced, and keeping a field that still
+cannot raise a call's class would be keeping a lie; argument-dependent
+classes are finding F3, out of scope for v0.3. What is enforced: ``locked``
+refuses every operation touching the resource, and command-level
+``safety_class`` overrides now genuinely bite, because raising a command to
+S3 makes it require an operator grant (SPEC 8.6). ``hazard`` appears in the
+deck resource content, so an agent reading ``labwire:deck`` sees which
+labware is dangerous even though the protocol cannot yet grade the call.
 
 Example:
     >>> AnnotationFile().version
@@ -82,12 +83,7 @@ class ResourceAnnotation(_Strict):
 
     description: str | None = None
     hazard: str | None = None
-    """Free text, surfaced to agents in the deck description."""
-    safety_class: SafetyClass | None = None
-    """The effective class for operations touching this resource.
-
-    Reported and recorded, not enforced: see the module docstring.
-    """
+    """Free text, surfaced to agents in the deck resource content."""
     locked: bool = False
     """Refuse every operation that touches this resource.
 
@@ -137,7 +133,8 @@ class AnnotationFile(_Strict):
     labware: dict[str, ResourceAnnotation] = {}
     """Keyed by PyLabRobot labware model or class name; defaults for every instance."""
     resources: dict[str, ResourceAnnotation] = {}
-    """Keyed by the resource's own name; overrides the labware entry per field."""
+    """Keyed by the labware's deck URI (``labwire:deck/<name>``); overrides
+    the labware entry per field."""
 
     @model_validator(mode="after")
     def _supported_version(self) -> Self:
@@ -186,17 +183,17 @@ def _merge(layers: list[ResourceAnnotation]) -> ResourceAnnotation:
 def annotation_for(
     annotations: AnnotationFile,
     *,
-    name: str,
+    uri: str,
     model: str | None = None,
     type_name: str | None = None,
 ) -> ResourceAnnotation:
     """The annotation in force for one resource, merged per field.
 
     Layers, later winning: the labware entry keyed by PyLabRobot class, then
-    the one keyed by labware model, then the resource's own name.
+    the one keyed by labware model, then the labware's deck URI.
 
     Example:
-        >>> annotation_for(AnnotationFile(), name="plate").locked
+        >>> annotation_for(AnnotationFile(), uri="labwire:deck/plate").locked
         False
     """
     layers = [
@@ -204,8 +201,8 @@ def annotation_for(
         for key in (type_name, model)
         if key is not None and key in annotations.labware
     ]
-    if name in annotations.resources:
-        layers.append(annotations.resources[name])
+    if uri in annotations.resources:
+        layers.append(annotations.resources[uri])
     return _merge(layers)
 
 

@@ -26,18 +26,18 @@ labware:
     description: Corning Costar 96-well flat-bottom plate, 360 uL per well.
 
 resources:
-  source_plate:
+  labwire:deck/source_plate:
     description: Holds the concentrated dye stock in A1.
     hazard: none
-  dilution_plate:
+  labwire:deck/dilution_plate:
     description: Row A receives the two-fold dilution series.
     hazard: none
 
   # What a hazard annotation looks like in practice. Nothing on this deck is
   # dangerous, so the example is commented out rather than faked:
   #
-  # acid_stock:
+  # labwire:deck/acid_stock:
   #   description: 1 M hydrochloric acid.
   #   hazard: corrosive
-  #   safety_class: S3   # reported and recorded; see SPEC-FINDINGS.md
-  #   locked: true       # refused outright, which v0.2 *can* enforce
+  #   locked: true       # refused outright; hazard itself surfaces in the
+  #                      # deck resource content for the agent to read

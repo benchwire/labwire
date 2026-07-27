@@ -39,17 +39,14 @@ MAX_ROUNDS = 60
 SYSTEM_PROMPT = f"""You are operating a liquid handler over the Labwire protocol. The \
 machine is driven by PyLabRobot, exposed to you as tools.
 
-Start by calling describe_deck. You cannot plan anything until you know what labware is \
-loaded and what it holds; nothing else tells you.
-
-Addressing: wells and tip spots are named "<labware>/<item>", for example \
-"source_plate/A1" or "tips/A1". Use exactly the labware names describe_deck reports. \
-Never guess a name, and never use PyLabRobot's internal names.
+Read the labwire:deck resource before planning: its index lists every container and \
+tip site a command parameter can reference, as full URIs. Use those URIs exactly as \
+the index spells them.
 
 Goal: run a two-fold serial dilution across row A of the dilution plate, \
 {{steps}} steps. Each step moves {STEP_VOLUME_UL:.0f} uL from the previous well into the \
-next, so step 1 goes from the dye in source_plate/A1 into dilution_plate/A1, step 2 \
-from dilution_plate/A1 into dilution_plate/A2, and so on.
+next, so step 1 goes from the dye stock well A1 of the source plate into the first \
+dilution well, step 2 from that well into the second, and so on.
 
 Technique: use a fresh tip for each step. Pick up one tip, transfer, then discard it \
 before the next step. Carrying one tip through the series would contaminate it.
@@ -73,6 +70,27 @@ async def build_tools(
     tools: list[dict[str, Any]] = []
     registry: dict[str, CommandSpec] = {}
     descriptor = await rig.client.describe()
+    if descriptor.resources:
+        # The read is model-callable, not host-optional: the uri parameter is
+        # an enum of the declared resources, so the model cannot get it wrong.
+        tools.append(
+            {
+                "name": "read_resource",
+                "description": (
+                    "Read one of this instrument's resources: its typed content and "
+                    "the index of everything a command parameter can reference. "
+                    + " ".join(f"{r.uri}: {r.description}" for r in descriptor.resources)
+                ),
+                "input_schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["uri"],
+                    "properties": {
+                        "uri": {"type": "string", "enum": [r.uri for r in descriptor.resources]}
+                    },
+                },
+            }
+        )
     for spec in descriptor.commands:
         if spec.name == "stop":
             continue  # the agent has no reason to halt the machine mid-series
@@ -112,6 +130,9 @@ async def execute_tool(
     Transfer run ids are recorded as they happen, so the demo verifies the
     exact bundle the agent produced rather than the newest file on disk.
     """
+    if name == "read_resource":
+        snapshot = await client.read_resource(str(arguments["uri"]))
+        return snapshot.model_dump_json(exclude_none=True)
     if name not in registry:
         return f"ERROR: no such tool {name!r}"
     spec = registry[name]
@@ -133,11 +154,13 @@ async def execute_tool(
 
 async def prepare(rig: DilutionRig, steps: int) -> None:
     """Declare what the plates hold, as a human loading the deck would."""
-    await rig.call("set_well_volume", {"well": "source_plate/A1", "volume_ul": DYE_VOLUME_UL})
+    await rig.call(
+        "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": DYE_VOLUME_UL}
+    )
     for well in dilution_wells(steps):
         await rig.call("set_well_volume", {"well": well, "volume_ul": DILUENT_VOLUME_UL})
     print(
-        f"operator loaded the deck: {DYE_VOLUME_UL:.0f} uL dye in source_plate/A1, "
+        f"operator loaded the deck: {DYE_VOLUME_UL:.0f} uL dye in the source plate, "
         f"{DILUENT_VOLUME_UL:.0f} uL diluent in {steps} dilution wells\n"
     )
 
@@ -182,9 +205,9 @@ async def run_claude(rig: DilutionRig, api_key: str, steps: int, transfers: list
 
 async def run_scripted(rig: DilutionRig, steps: int, transfers: list[str]) -> None:
     """The same series, planned by this script rather than by an agent."""
-    source = "source_plate/A1"
+    source = "labwire:deck/source_plate/A1"
     for index, target in enumerate(dilution_wells(steps)):
-        await rig.call("pick_up_tips", {"tip_spots": [f"tips/A{index + 1}"]})
+        await rig.call("pick_up_tips", {"tip_spots": [f"labwire:deck/tips/A{index + 1}"]})
         _result, run_id = await rig.call(
             "transfer", {"source": source, "targets": [target], "volumes_ul": [STEP_VOLUME_UL]}
         )
@@ -209,10 +232,10 @@ async def main() -> None:
             print("ANTHROPIC_API_KEY not set - falling back to the scripted dilution\n")
             await run_scripted(rig, steps, transfers)
 
-        state, _run = await rig.call("describe_deck")
+        snapshot = await rig.client.read_resource("labwire:deck")
         print("\nfinal deck contents:")
-        for well in state["contents"]:
-            print(f"    {well['address']:20} {well['volume_ul']:7.1f} uL")
+        for well in snapshot.content["contents"]:
+            print(f"    {well['uri']:36} {well['volume_ul']:7.1f} uL")
 
         if not transfers:
             print("\nno liquid was moved, so there is no signed evidence")

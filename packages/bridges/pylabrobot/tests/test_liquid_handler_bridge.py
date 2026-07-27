@@ -54,14 +54,30 @@ async def test_the_instrument_describes_itself_with_units_and_safety(
     }
 
 
-async def test_address_parameters_carry_a_pattern(
+async def test_address_parameters_carry_typed_references_and_no_pattern(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
-    """All JSON Schema can say about a reference is its shape."""
+    """The F1 fix: the reference declaration replaced the invented pattern.
+
+    A pattern is satisfiable by invention; resource_ref points at the deck
+    index instead, and rides inside the schema that travels to agents.
+    """
     _rig, client = served
     descriptor = await client.describe()
     schema = next(c for c in descriptor.commands if c.name == "aspirate").params_schema
-    assert "pattern" in schema["properties"]["wells"]["items"]
+    items = schema["properties"]["wells"]["items"]
+    assert "pattern" not in items
+    assert items["resource_ref"] == {"kind": "container", "enumerated_by": "labwire:deck"}
+    assert "labwire:deck" in items["description"]  # the pointer an agent reads
+
+
+async def test_the_descriptor_declares_the_deck_resource(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    _rig, client = served
+    descriptor = await client.describe()
+    assert [r.uri for r in descriptor.resources] == ["labwire:deck"]
+    assert "container" in descriptor.resources[0].item_kinds
 
 
 async def test_optional_parameters_are_not_required(
@@ -81,43 +97,51 @@ async def test_a_full_transfer_runs_through_the_protocol(
 ) -> None:
     """Tips on, aspirate, dispense, tips off, with the deck read at each step."""
     _rig, client = served
-    await _call(client, "set_well_volume", {"well": "source_plate/A1", "volume_ul": 300.0})
+    await _call(
+        client, "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": 300.0}
+    )
 
-    await _call(client, "pick_up_tips", {"tip_spots": ["tips/A1"]})
-    state = await _call(client, "describe_deck", {})
-    assert state["channels"][0]["has_tip"] is True
+    await _call(client, "pick_up_tips", {"tip_spots": ["labwire:deck/tips/A1"]})
+    snapshot = await client.read_resource("labwire:deck")
+    assert snapshot.content["channels"][0]["has_tip"] is True
 
-    await _call(client, "aspirate", {"wells": ["source_plate/A1"], "volumes_ul": [100.0]})
-    await _call(client, "dispense", {"wells": ["target_plate/A1"], "volumes_ul": [100.0]})
+    await _call(
+        client, "aspirate", {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [100.0]}
+    )
+    await _call(
+        client, "dispense", {"wells": ["labwire:deck/target_plate/A1"], "volumes_ul": [100.0]}
+    )
     await _call(client, "return_tips", {})
 
-    state = await _call(client, "describe_deck", {})
-    volumes = {well["address"]: well["volume_ul"] for well in state["contents"]}
-    assert volumes["source_plate/A1"] == 200.0
-    assert volumes["target_plate/A1"] == 100.0
-    assert state["channels"][0]["has_tip"] is False
+    snapshot = await client.read_resource("labwire:deck")
+    volumes = {well["uri"]: well["volume_ul"] for well in snapshot.content["contents"]}
+    assert volumes["labwire:deck/source_plate/A1"] == 200.0
+    assert volumes["labwire:deck/target_plate/A1"] == 100.0
+    assert snapshot.content["channels"][0]["has_tip"] is False
 
 
 async def test_transfer_moves_liquid_into_several_wells(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
     _rig, client = served
-    await _call(client, "set_well_volume", {"well": "source_plate/A1", "volume_ul": 300.0})
-    await _call(client, "pick_up_tips", {"tip_spots": ["tips/A1"]})
+    await _call(
+        client, "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": 300.0}
+    )
+    await _call(client, "pick_up_tips", {"tip_spots": ["labwire:deck/tips/A1"]})
     result = await _call(
         client,
         "transfer",
         {
-            "source": "source_plate/A1",
-            "targets": ["target_plate/A1", "target_plate/B1"],
+            "source": "labwire:deck/source_plate/A1",
+            "targets": ["labwire:deck/target_plate/A1", "labwire:deck/target_plate/B1"],
             "volumes_ul": [50.0, 75.0],
         },
     )
     assert result["total_volume_ul"] == 125.0
-    state = await _call(client, "describe_deck", {})
-    volumes = {well["address"]: well["volume_ul"] for well in state["contents"]}
-    assert volumes["target_plate/A1"] == 50.0
-    assert volumes["target_plate/B1"] == 75.0
+    snapshot = await client.read_resource("labwire:deck")
+    volumes = {well["uri"]: well["volume_ul"] for well in snapshot.content["contents"]}
+    assert volumes["labwire:deck/target_plate/A1"] == 50.0
+    assert volumes["labwire:deck/target_plate/B1"] == 75.0
 
 
 async def test_eight_channels_aspirate_a_column_at_once(
@@ -125,10 +149,12 @@ async def test_eight_channels_aspirate_a_column_at_once(
 ) -> None:
     """JSON arrays carry cardinality, which is why the range DSL is not exposed."""
     _rig, client = served
-    column = [f"source_plate/{row}1" for row in "ABCDEFGH"]
+    column = [f"labwire:deck/source_plate/{row}1" for row in "ABCDEFGH"]
     for well in column:
         await _call(client, "set_well_volume", {"well": well, "volume_ul": 200.0})
-    await _call(client, "pick_up_tips", {"tip_spots": [f"tips/{row}1" for row in "ABCDEFGH"]})
+    await _call(
+        client, "pick_up_tips", {"tip_spots": [f"labwire:deck/tips/{row}1" for row in "ABCDEFGH"]}
+    )
     result = await _call(client, "aspirate", {"wells": column, "volumes_ul": [50.0] * 8})
     assert result["total_volume_ul"] == 400.0
 
@@ -138,10 +164,16 @@ async def test_telemetry_reports_cumulative_volume(
 ) -> None:
     _rig, client = served
     async with client.telemetry(["volume_dispensed_ul"]) as subscription:
-        await _call(client, "set_well_volume", {"well": "source_plate/A1", "volume_ul": 300.0})
-        await _call(client, "pick_up_tips", {"tip_spots": ["tips/A1"]})
-        await _call(client, "aspirate", {"wells": ["source_plate/A1"], "volumes_ul": [80.0]})
-        await _call(client, "dispense", {"wells": ["target_plate/A1"], "volumes_ul": [80.0]})
+        await _call(
+            client, "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": 300.0}
+        )
+        await _call(client, "pick_up_tips", {"tip_spots": ["labwire:deck/tips/A1"]})
+        await _call(
+            client, "aspirate", {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [80.0]}
+        )
+        await _call(
+            client, "dispense", {"wells": ["labwire:deck/target_plate/A1"], "volumes_ul": [80.0]}
+        )
         async with asyncio.timeout(20.0):
             async for sample in subscription:
                 if sample.value == 80.0:
@@ -156,35 +188,42 @@ async def test_moving_liquid_without_a_confirmation_is_refused(
 ) -> None:
     _rig, client = served
     with pytest.raises(ConfirmationRequiredError):
-        await client.submit("aspirate", {"wells": ["source_plate/A1"], "volumes_ul": [10.0]})
+        await client.submit(
+            "aspirate", {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [10.0]}
+        )
 
 
 async def test_reading_the_deck_needs_no_confirmation(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
-    """describe_deck is S0: an agent must always be able to see where it is."""
+    """A resource read is not a command: no class, no confirmation, no run."""
     _rig, client = served
-    handle = await client.submit("describe_deck", {})
-    assert (await handle.result(timeout=20.0))["labware"]
+    snapshot = await client.read_resource("labwire:deck")
+    assert snapshot.content["labware"]
+    assert snapshot.index  # and it enumerates the reference targets
 
 
 async def test_a_locked_plate_refuses_every_operation_touching_it(rig: LiquidHandler) -> None:
     """The one escalation v0.2 can enforce, since S2 and S3 gate identically."""
-    annotations = AnnotationFile(resources={"source_plate": ResourceAnnotation(locked=True)})
+    annotations = AnnotationFile(
+        resources={"labwire:deck/source_plate": ResourceAnnotation(locked=True)}
+    )
     server = InstrumentServer(PyLabRobotInstrument(rig, annotations), confirmation_token=GRANT)
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
     async with LabwireClient.attach(client_end) as client:
         handle = await client.submit(
             "aspirate",
-            {"wells": ["source_plate/A1"], "volumes_ul": [10.0]},
+            {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [10.0]},
             confirmation=GRANT,
         )
         with pytest.raises(InterlockError, match="locked"):
             await handle.result(timeout=20.0)
         # an unlocked plate is unaffected
         await client.submit(
-            "set_well_volume", {"well": "target_plate/A1", "volume_ul": 10.0}, confirmation=GRANT
+            "set_well_volume",
+            {"well": "labwire:deck/target_plate/A1", "volume_ul": 10.0},
+            confirmation=GRANT,
         )
     await server.aclose()
 
@@ -216,9 +255,13 @@ async def test_aspirating_with_no_tip_is_an_interlock_not_a_crash(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
     _rig, client = served
-    await _call(client, "set_well_volume", {"well": "source_plate/A1", "volume_ul": 300.0})
+    await _call(
+        client, "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": 300.0}
+    )
     handle = await client.submit(
-        "aspirate", {"wells": ["source_plate/A1"], "volumes_ul": [10.0]}, confirmation=GRANT
+        "aspirate",
+        {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [10.0]},
+        confirmation=GRANT,
     )
     with pytest.raises(InterlockError, match="tip"):
         await handle.result(timeout=20.0)
@@ -228,10 +271,14 @@ async def test_overdrawing_a_well_is_a_validation_error(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
     _rig, client = served
-    await _call(client, "set_well_volume", {"well": "source_plate/A1", "volume_ul": 50.0})
-    await _call(client, "pick_up_tips", {"tip_spots": ["tips/A1"]})
+    await _call(
+        client, "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": 50.0}
+    )
+    await _call(client, "pick_up_tips", {"tip_spots": ["labwire:deck/tips/A1"]})
     handle = await client.submit(
-        "aspirate", {"wells": ["source_plate/A1"], "volumes_ul": [500.0]}, confirmation=GRANT
+        "aspirate",
+        {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [500.0]},
+        confirmation=GRANT,
     )
     with pytest.raises(ValidationError, match="Not enough liquid"):
         await handle.result(timeout=20.0)
@@ -240,23 +287,36 @@ async def test_overdrawing_a_well_is_a_validation_error(
 async def test_an_unknown_well_is_refused_before_anything_moves(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
+    """The server's reference walk refuses it; no run is ever created."""
+    from labwire.core import UnknownReferenceError
+
     _rig, client = served
-    handle = await client.submit(
-        "aspirate", {"wells": ["source_plate/Z99"], "volumes_ul": [10.0]}, confirmation=GRANT
-    )
-    with pytest.raises(ValidationError, match="8 rows by 12 columns"):
-        await handle.result(timeout=20.0)
+    with pytest.raises(UnknownReferenceError) as caught:
+        await client.submit(
+            "aspirate",
+            {"wells": ["labwire:deck/source_plate/Z99"], "volumes_ul": [10.0]},
+            confirmation=GRANT,
+        )
+    details = caught.value.details
+    assert details is not None
+    assert details["reason"] == "no_such_item"
+    assert details["resolved_prefix"] == "labwire:deck/source_plate"
+    assert details["read"] == {"method": "resource/read", "params": {"uri": "labwire:deck"}}
 
 
-async def test_a_malformed_address_is_rejected_by_the_schema(
+async def test_a_malformed_reference_is_refused_as_unknown_reference(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
-    """The pattern catches shape without the server ever touching the deck."""
+    """No pattern exists to catch shape; the reference walk refuses instead."""
+    from labwire.core import UnknownReferenceError
+
     _rig, client = served
-    with pytest.raises(ValidationError):
+    with pytest.raises(UnknownReferenceError) as caught:
         await client.submit(
             "aspirate", {"wells": ["not a valid address"], "volumes_ul": [10.0]}, confirmation=GRANT
         )
+    assert caught.value.details is not None
+    assert caught.value.details["reason"] == "malformed_uri"
 
 
 async def test_mismatched_addresses_and_volumes_are_refused(
@@ -265,7 +325,10 @@ async def test_mismatched_addresses_and_volumes_are_refused(
     _rig, client = served
     handle = await client.submit(
         "aspirate",
-        {"wells": ["source_plate/A1", "source_plate/B1"], "volumes_ul": [10.0]},
+        {
+            "wells": ["labwire:deck/source_plate/A1", "labwire:deck/source_plate/B1"],
+            "volumes_ul": [10.0],
+        },
         confirmation=GRANT,
     )
     with pytest.raises(ValidationError, match="one to one"):
@@ -278,7 +341,7 @@ async def test_declaring_more_volume_than_a_well_holds_is_refused(
     _rig, client = served
     handle = await client.submit(
         "set_well_volume",
-        {"well": "source_plate/A1", "volume_ul": 10_000.0},
+        {"well": "labwire:deck/source_plate/A1", "volume_ul": 10_000.0},
         confirmation=GRANT,
     )
     with pytest.raises(ValidationError, match="overfill"):
@@ -316,7 +379,7 @@ async def test_cancelling_a_finished_command_reports_it_cannot_be_cancelled(
     from labwire.core.errors import NotCancelableError
 
     _rig, client = served
-    handle = await client.submit("describe_deck", {})
+    handle = await client.submit("stop", {})
     await handle.result(timeout=20.0)
     with pytest.raises(NotCancelableError):
         await handle.cancel()
@@ -342,11 +405,11 @@ async def test_a_run_produces_a_verifiable_signed_bundle(rig: LiquidHandler, tmp
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
     async with LabwireClient.attach(client_end) as client:
-        resolve(rig, "source_plate/A1").tracker.set_volume(300.0)
-        await _call(client, "pick_up_tips", {"tip_spots": ["tips/A1"]})
+        resolve(rig, "labwire:deck/source_plate/A1").tracker.set_volume(300.0)
+        await _call(client, "pick_up_tips", {"tip_spots": ["labwire:deck/tips/A1"]})
         handle = await client.submit(
             "aspirate",
-            {"wells": ["source_plate/A1"], "volumes_ul": [60.0]},
+            {"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [60.0]},
             confirmation=GRANT,
         )
         await handle.result(timeout=20.0)

@@ -26,10 +26,10 @@ async def test_a_fresh_deck_reports_no_liquid_at_all(rig: LiquidHandler) -> None
 
 
 async def test_a_well_with_liquid_appears_with_its_address(rig: LiquidHandler) -> None:
-    resolve(rig, "source_plate/A1").tracker.set_volume(200.0)
+    resolve(rig, "labwire:deck/source_plate/A1").tracker.set_volume(200.0)
     contents = deck_state(rig).contents
     assert len(contents) == 1
-    assert contents[0].address == "source_plate/A1"
+    assert contents[0].uri == "labwire:deck/source_plate/A1"
     assert contents[0].volume_ul == 200.0
     assert contents[0].max_volume_ul == 360.0
 
@@ -39,21 +39,21 @@ async def test_channels_report_whether_they_hold_a_tip(rig: LiquidHandler) -> No
     assert len(before) == 8
     assert not any(channel.has_tip for channel in before)
 
-    await rig.pick_up_tips(resolve(rig, "tips").get_items(["A1", "B1"]))
+    await rig.pick_up_tips(resolve(rig, "labwire:deck/tips").get_items(["A1", "B1"]))
     after = deck_state(rig).channels
     assert [channel.has_tip for channel in after[:3]] == [True, True, False]
     assert after[0].tip_max_volume_ul == 1065.0  # bounds a single aspiration
 
 
 async def test_a_tip_rack_reports_how_many_tips_are_left(rig: LiquidHandler) -> None:
-    assert deck_state(rig).find("tips").tips_available == 96
-    await rig.pick_up_tips(resolve(rig, "tips").get_items(["A1", "B1"]))
-    assert deck_state(rig).find("tips").tips_available == 94
+    assert deck_state(rig).find("labwire:deck/tips").tips_available == 96
+    await rig.pick_up_tips(resolve(rig, "labwire:deck/tips").get_items(["A1", "B1"]))
+    assert deck_state(rig).find("labwire:deck/tips").tips_available == 94
 
 
 async def test_the_projection_stays_small_with_a_deck_in_use(rig: LiquidHandler) -> None:
     for row in "ABCDEFGH":
-        resolve(rig, f"source_plate/{row}1").tracker.set_volume(300.0)
+        resolve(rig, f"labwire:deck/source_plate/{row}1").tracker.set_volume(300.0)
     projected = json.dumps(deck_state(rig).model_dump(mode="json"))
     assert len(json.dumps(rig.serialize())) > 100_000
     assert len(projected) < 8_000
@@ -61,8 +61,8 @@ async def test_the_projection_stays_small_with_a_deck_in_use(rig: LiquidHandler)
 
 async def test_tip_racks_do_not_report_well_contents(rig: LiquidHandler) -> None:
     """A tip spot is not a container; counting tips is the useful projection."""
-    addresses = {well.address for well in deck_state(rig).contents}
-    assert not any(address.startswith("tips/") for address in addresses)
+    addresses = {well.uri for well in deck_state(rig).contents}
+    assert not any(address.startswith("labwire:deck/tips/") for address in addresses)
 
 
 # --- annotations ------------------------------------------------------------
@@ -114,17 +114,16 @@ commands:
 labware:
   Cor_96_wellplate_360ul_Fb: {description: A Costar 96-well plate.}
 resources:
-  source_plate:
+  labwire:deck/source_plate:
     description: 1 M hydrochloric acid.
     hazard: corrosive
-    safety_class: S3
     locked: true
 """,
         )
     )
     assert annotations.instrument.intent_tags == ["liquid_handling"]
     assert annotations.commands["transfer"].estimated_duration_s == 4.0
-    assert annotations.resources["source_plate"].hazard == "corrosive"
+    assert annotations.resources["labwire:deck/source_plate"].hazard == "corrosive"
 
 
 def test_resource_entries_override_labware_entries_field_by_field() -> None:
@@ -132,17 +131,20 @@ def test_resource_entries_override_labware_entries_field_by_field() -> None:
         labware={
             "Cor_96_wellplate_360ul_Fb": ResourceAnnotation(description="A plate.", hazard="none")
         },
-        resources={"acid_stock": ResourceAnnotation(hazard="corrosive")},
+        resources={"labwire:deck/acid_stock": ResourceAnnotation(hazard="corrosive")},
     )
     merged = annotation_for(
-        annotations, name="acid_stock", model="Cor_96_wellplate_360ul_Fb", type_name="Plate"
+        annotations,
+        uri="labwire:deck/acid_stock",
+        model="Cor_96_wellplate_360ul_Fb",
+        type_name="Plate",
     )
     assert merged.hazard == "corrosive"  # the resource entry wins
     assert merged.description == "A plate."  # untouched fields survive
 
 
 def test_an_unannotated_resource_gets_harmless_defaults() -> None:
-    merged = annotation_for(AnnotationFile(), name="whatever")
+    merged = annotation_for(AnnotationFile(), uri="labwire:deck/whatever")
     assert merged.locked is False
     assert merged.hazard is None
 
@@ -156,8 +158,10 @@ async def test_an_annotation_naming_a_resource_that_is_not_there_is_refused(
     state = deck_state(rig)
     with pytest.raises(AnnotationError, match="acid_stock"):
         check(
-            AnnotationFile(resources={"acid_stock": ResourceAnnotation(hazard="corrosive")}),
-            known_resources={item.address for item in state.labware},
+            AnnotationFile(
+                resources={"labwire:deck/acid_stock": ResourceAnnotation(hazard="corrosive")}
+            ),
+            known_resources={item.uri for item in state.labware},
             known_labware={item.type_name for item in state.labware},
             known_commands={c.name for c in command_surface()},
         )
@@ -195,23 +199,27 @@ async def test_a_hazard_annotation_reaches_the_deck_projection(rig: LiquidHandle
     """An agent has to be able to see what it is about to pipette."""
     annotations = AnnotationFile(
         resources={
-            "source_plate": ResourceAnnotation(hazard="corrosive", safety_class="S3"),
+            "labwire:deck/source_plate": ResourceAnnotation(hazard="corrosive"),
         }
     )
-    plate = deck_state(rig, annotations).find("source_plate")
+    plate = deck_state(rig, annotations).find("labwire:deck/source_plate")
     assert plate.hazard == "corrosive"
-    assert plate.safety_class == "S3"
 
 
 async def test_locking_a_plate_locks_every_well_of_it(rig: LiquidHandler) -> None:
     """Locking is checked through the parent, so nobody names 96 wells."""
-    annotations = AnnotationFile(resources={"source_plate": ResourceAnnotation(locked=True)})
-    wells = [resolve(rig, "source_plate/A1"), resolve(rig, "source_plate/H12")]
+    annotations = AnnotationFile(
+        resources={"labwire:deck/source_plate": ResourceAnnotation(locked=True)}
+    )
+    wells = [
+        resolve(rig, "labwire:deck/source_plate/A1"),
+        resolve(rig, "labwire:deck/source_plate/H12"),
+    ]
     assert locked_labware(annotations, wells) == ["source_plate"]
 
 
 async def test_an_unlocked_plate_reports_nothing_locked(rig: LiquidHandler) -> None:
-    wells = [resolve(rig, "source_plate/A1")]
+    wells = [resolve(rig, "labwire:deck/source_plate/A1")]
     assert locked_labware(AnnotationFile(), wells) == []
 
 
@@ -219,11 +227,14 @@ async def test_locking_by_labware_model_covers_every_instance(rig: LiquidHandler
     annotations = AnnotationFile(
         labware={"Cor_96_wellplate_360ul_Fb": ResourceAnnotation(locked=True)}
     )
-    wells = [resolve(rig, "source_plate/A1"), resolve(rig, "target_plate/A1")]
+    wells = [
+        resolve(rig, "labwire:deck/source_plate/A1"),
+        resolve(rig, "labwire:deck/target_plate/A1"),
+    ]
     assert sorted(locked_labware(annotations, wells)) == ["source_plate", "target_plate"]
 
 
 async def test_labware_kinds_survive_annotation(rig: LiquidHandler) -> None:
     state = deck_state(rig, AnnotationFile())
-    assert state.find("tips").kind is LabwareKind.TIP_RACK
-    assert state.find("source_plate").kind is LabwareKind.PLATE
+    assert state.find("labwire:deck/tips").kind is LabwareKind.TIP_RACK
+    assert state.find("labwire:deck/source_plate").kind is LabwareKind.PLATE

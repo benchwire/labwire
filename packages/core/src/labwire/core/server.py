@@ -34,7 +34,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, ClassVar, Concatenate, Protocol, cast
+from typing import Annotated, Any, ClassVar, Concatenate, Protocol, cast
 
 from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
@@ -540,6 +540,33 @@ def resource(
         content_model=content_model,
         item_kinds=item_kinds or [],
     )
+
+
+def ResourceRef(kind: str, *, enumerated_by: str, description: str | None = None) -> Any:
+    """An ``Annotated[str, ...]`` parameter type carrying a typed reference.
+
+    The ``resource_ref`` keyword and a generated description ride inside the
+    parameter's own schema (SPEC §7.2), which is the object that travels into
+    agent tool schemas, so the pointer to where valid values live reaches the
+    agent at the exact parameter it cannot fill. No pattern is emitted:
+    patterns are satisfiable by invention.
+
+    Example:
+        >>> Container = ResourceRef("container", enumerated_by="labwire:deck")
+        >>> # async def transfer(self, ctx, source: Container, ...) -> ...
+    """
+    article = "an" if kind[0] in "aeiou" else "a"
+    sentence = description or (
+        f"Must be {article} {kind} listed in the index of resource {enumerated_by}; "
+        "read that resource for the valid values."
+    )
+    return Annotated[
+        str,
+        Field(
+            description=sentence,
+            json_schema_extra={"resource_ref": {"kind": kind, "enumerated_by": enumerated_by}},
+        ),
+    ]
 
 
 def unit_field(unit_code: str, **kwargs: Any) -> Any:
