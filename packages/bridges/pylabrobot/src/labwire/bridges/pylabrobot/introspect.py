@@ -217,7 +217,7 @@ def _grid_of(resource: Any) -> Grid | None:
     return Grid(rows=rows, columns=columns, item_max_volume_ul=capacity)
 
 
-def _addressable(root: Any) -> list[Any]:
+def addressable_resources(root: Any) -> list[Any]:
     """Deck children an agent addresses directly, not their items.
 
     Wells and tip spots are reached through their parent, so listing them here
@@ -385,7 +385,7 @@ def introspect(liquid_handler: Any) -> DraftInstrument:
     """
     labware: list[DraftLabware] = []
     unresolved: list[Unresolved] = []
-    for resource in _addressable(liquid_handler):
+    for resource in addressable_resources(liquid_handler):
         described, gaps = _describe_labware(resource)
         labware.append(described)
         unresolved.extend(gaps)
