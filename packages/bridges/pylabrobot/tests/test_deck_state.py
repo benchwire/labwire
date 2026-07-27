@@ -170,9 +170,9 @@ async def test_an_annotation_naming_a_resource_that_is_not_there_is_refused(
 def test_an_annotation_naming_an_unexposed_command_is_refused() -> None:
     from labwire.bridges.pylabrobot.annotations import CommandAnnotation
 
-    with pytest.raises(AnnotationError, match="move_plate"):
+    with pytest.raises(AnnotationError, match="describe_deck"):
         check(
-            AnnotationFile(commands={"move_plate": CommandAnnotation(exclude=True)}),
+            AnnotationFile(commands={"describe_deck": CommandAnnotation(exclude=True)}),
             known_resources=set(),
             known_labware=set(),
             known_commands={c.name for c in command_surface()},

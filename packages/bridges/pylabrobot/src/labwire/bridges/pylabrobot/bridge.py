@@ -52,6 +52,9 @@ _POLL_S = 0.02
 
 Container = ResourceRef("container", enumerated_by=DECK_URI)
 TipSite = ResourceRef("tip_site", enumerated_by=DECK_URI)
+Labware = ResourceRef("labware", enumerated_by=DECK_URI)
+Site = ResourceRef("site", enumerated_by=DECK_URI)
+Lid = ResourceRef("lid", enumerated_by=DECK_URI)
 """Typed reference parameter types (SPEC §7.2).
 
 Until v0.3 the bridge published an invented address pattern here, which was
@@ -113,7 +116,7 @@ class TipResult(BaseModel):
     of a protocol. See SPEC-FINDINGS.md, finding F5.
 
     Example:
-        >>> TipResult(tip_spots=["tips/A1"], channels_used=[0]).channels_used
+        >>> TipResult(channels_used=[0]).channels_used
         [0]
     """
 
@@ -129,7 +132,7 @@ class LiquidResult(BaseModel):
     """What an aspirate or dispense moved.
 
     Example:
-        >>> LiquidResult(wells=["plate/A1"], total_volume_ul=50.0).total_volume_ul
+        >>> LiquidResult(wells=["w"], total_volume_ul=50.0).total_volume_ul
         50.0
     """
 
@@ -143,8 +146,8 @@ class TransferResult(BaseModel):
     """What a transfer moved, and where.
 
     Example:
-        >>> TransferResult(source="a/A1", targets=["b/A1"], total_volume_ul=10.0).source
-        'a/A1'
+        >>> TransferResult(source="s", targets=["t"], total_volume_ul=10.0).total_volume_ul
+        10.0
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -158,7 +161,7 @@ class WellVolumeResult(BaseModel):
     """The volume a well is now recorded as holding.
 
     Example:
-        >>> WellVolumeResult(well="plate/A1", volume_ul=200.0).volume_ul
+        >>> WellVolumeResult(well="w", volume_ul=200.0).volume_ul
         200.0
     """
 
@@ -166,6 +169,21 @@ class WellVolumeResult(BaseModel):
 
     well: str
     volume_ul: float
+
+
+class MoveResult(BaseModel):
+    """What a gripper move did: the thing, where it was, where it is now.
+
+    Example:
+        >>> MoveResult(moved="labwire:deck/p", origin="labwire:deck/a", to="labwire:deck/b").to
+        'labwire:deck/b'
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    moved: str
+    origin: str
+    to: str
 
 
 class StopResult(BaseModel):
@@ -213,6 +231,7 @@ class PyLabRobotBridge(Instrument):
             "tip_rack",
             "trough",
             "trash",
+            "lid",
             "container",
             "tip_site",
             "site",
@@ -440,6 +459,46 @@ class PyLabRobotBridge(Instrument):
             raise map_error(exc) from exc
         return WellVolumeResult(well=well, volume_ul=volume_ul)
 
+    async def _move_gripped(
+        self, ctx: CommandContext, moved_uri: str, to_uri: str, op: str
+    ) -> MoveResult:
+        thing = resolve(self._lh, moved_uri)
+        destination = resolve(self._lh, to_uri)
+        self._refuse_locked([thing, destination])
+        origin_name = getattr(getattr(thing, "parent", None), "name", None)
+        origin = f"{DECK_URI}/{origin_name}" if origin_name else DECK_URI
+        operation = getattr(self._lh, op)
+        await self._operate(ctx, operation(thing, destination), op)
+        self._publish_state()
+        return MoveResult(moved=moved_uri, origin=origin, to=to_uri)
+
+    async def do_move_plate(
+        self,
+        ctx: CommandContext,
+        plate: Labware,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        to: Site,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+    ) -> MoveResult:
+        """Grip a plate and set it down on another site."""
+        return await self._move_gripped(ctx, plate, to, "move_plate")
+
+    async def do_move_lid(
+        self,
+        ctx: CommandContext,
+        lid: Lid,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        to: Labware,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+    ) -> MoveResult:
+        """Grip a plate lid and move it onto another plate."""
+        return await self._move_gripped(ctx, lid, to, "move_lid")
+
+    async def do_move_resource(
+        self,
+        ctx: CommandContext,
+        moved: Labware,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        to: Site,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+    ) -> MoveResult:
+        """Grip any labware and move it to a site."""
+        return await self._move_gripped(ctx, moved, to, "move_resource")
+
     async def do_stop(self, ctx: CommandContext) -> StopResult:
         """Stop the liquid handler."""
         try:
@@ -458,6 +517,9 @@ _IMPLEMENTATIONS: dict[str, str] = {
     "dispense": "do_dispense",
     "transfer": "do_transfer",
     "set_well_volume": "do_set_well_volume",
+    "move_plate": "do_move_plate",
+    "move_lid": "do_move_lid",
+    "move_resource": "do_move_resource",
     "stop": "do_stop",
 }
 
@@ -560,6 +622,9 @@ def PyLabRobotInstrument(
             ),
             description=(override.description if override else None) or spec.description,
             estimated_duration_s=(override.estimated_duration_s if override else None),
+            # A plate held in the gripper mid-traverse has no safe interruption;
+            # command/cancel on these returns -32007 instead (SPEC 8.3).
+            interruptible=spec.name not in {"move_plate", "move_lid", "move_resource"},
         )(implementation)
 
     generated = type("PyLabRobot_LiquidHandler", (PyLabRobotBridge,), namespace)

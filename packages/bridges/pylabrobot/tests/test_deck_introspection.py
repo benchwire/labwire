@@ -163,9 +163,9 @@ def test_declaring_a_wells_contents_is_s1_because_it_moves_nothing() -> None:
     assert classes["set_well_volume"] == "S1"
 
 
-def test_the_command_surface_has_nine_operations() -> None:
-    """Ten in v0.2; describe_deck became the deck resource."""
-    assert len(command_surface()) == 9
+def test_the_command_surface_has_twelve_operations() -> None:
+    """describe_deck became the deck resource; the three gripper moves joined."""
+    assert len(command_surface()) == 12
 
 
 def test_the_untyped_backend_passthrough_is_not_exposed() -> None:
@@ -174,9 +174,12 @@ def test_the_untyped_backend_passthrough_is_not_exposed() -> None:
     assert not any("backend" in name or "kwargs" in name for name in names)
 
 
-def test_gripper_moves_are_not_exposed_in_this_version() -> None:
-    names = {c.name for c in command_surface()}
-    assert not (names & {"move_plate", "move_lid", "move_resource"})
+def test_gripper_moves_are_exposed_and_hazardous() -> None:
+    """The condition LIMITATIONS documented is met: real S3 exists (SPEC 8.6)."""
+    classes = {c.name: c.safety_class for c in command_surface()}
+    assert classes["move_plate"] == "S3"
+    assert classes["move_lid"] == "S3"
+    assert classes["move_resource"] == "S3"
 
 
 def test_every_command_has_a_description() -> None:
@@ -187,6 +190,6 @@ async def test_the_command_surface_does_not_depend_on_the_deck(rig: LiquidHandle
     """PyLabRobot's frontend is one class, so there is nothing to discover."""
     before = introspect(rig).commands
     rig.deck.assign_child_resource(
-        Cor_96_wellplate_360ul_Fb(name="extra"), location=Coordinate(600, 200, 100)
+        Cor_96_wellplate_360ul_Fb(name="extra"), location=Coordinate(700, 300, 100)
     )
     assert introspect(rig).commands == before

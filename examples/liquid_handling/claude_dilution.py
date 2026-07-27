@@ -32,6 +32,7 @@ from rig import (
     DilutionRig,
     demo_steps,
     dilution_wells,
+    gripper_act,
 )
 
 MAX_ROUNDS = 60
@@ -39,28 +40,28 @@ MAX_ROUNDS = 60
 SYSTEM_PROMPT = f"""You are operating a liquid handler over the Labwire protocol. The \
 machine is driven by PyLabRobot, exposed to you as tools.
 
-Read the labwire:deck resource before planning: its index lists every container and \
-tip site a command parameter can reference, as full URIs. Use those URIs exactly as \
-the index spells them.
-
 Goal: run a two-fold serial dilution across row A of the dilution plate, \
-{{steps}} steps. Each step moves {STEP_VOLUME_UL:.0f} uL from the previous well into the \
-next, so step 1 goes from the dye stock well A1 of the source plate into the first \
-dilution well, step 2 from that well into the second, and so on.
+{{steps}} steps of {STEP_VOLUME_UL:.0f} uL each, starting from the dye stock in well A1 \
+of the source plate and carrying forward one well at a time.
 
 Technique: use a fresh tip for each step. Pick up one tip, transfer, then discard it \
 before the next step. Carrying one tip through the series would contaminate it.
 
-Safety: every tool tells you its safety class. Everything that moves or consumes \
-material is S2 and requires confirmation="{STANDING_GRANT}", the standing grant this \
-session's operator issued. describe_deck is S0 and set_well_volume is S1; neither needs \
-a confirmation. Never invent a confirmation value.
+When the series is complete, move the dilution plate to an empty staging site with \
+move_plate.
 
-Units are UCUM codes given per parameter; volumes are in uL. If a call fails, read the \
-error: it names what would have worked.
+Safety: every tool tells you its safety class. Liquid handling is S2 and requires \
+confirmation="{STANDING_GRANT}", the standing grant this session's operator issued. \
+S3 tools take an operator grant in the authorization field instead; a confirmation \
+never satisfies them, and you can never invent either value. If an S3 call is refused, \
+report the refusal and wait; if your operator gives you a grant id, present it for \
+exactly the same call.
 
-When the series is complete, stop calling tools and reply with one line: \
-FINAL: {{{{"steps_completed": <n>}}}}"""
+Units are UCUM codes given per parameter; volumes are in uL. If a call fails, the \
+error names what would have worked.
+
+When the series is done and the plate is moved, stop calling tools and reply with one \
+line: FINAL: {{{{"steps_completed": <n>}}}}"""
 
 
 async def build_tools(
@@ -100,7 +101,7 @@ async def build_tools(
         if spec.unit_annotations:
             units = ", ".join(f"{k} in {v}" for k, v in spec.unit_annotations.items())
             notes.append(f"Units (UCUM): {units}.")
-        if spec.safety_class in ("S2", "S3"):
+        if spec.safety_class == "S2":
             properties = dict(schema.get("properties", {}))
             properties["confirmation"] = {
                 "type": "string",
@@ -108,6 +109,24 @@ async def build_tools(
             }
             schema["properties"] = properties
             notes.append("Requires a confirmation value.")
+        elif spec.safety_class == "S3":
+            properties = dict(schema.get("properties", {}))
+            properties["authorization"] = {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["grant_id"],
+                "description": (
+                    "Operator grant. You cannot mint this. Present only an id an "
+                    "operator gave you for this exact call."
+                ),
+                "properties": {"grant_id": {"type": "string"}},
+            }
+            schema["properties"] = properties
+            notes.append(
+                "HAZARDOUS: requires an operator grant bound to these exact parameter "
+                "values; a confirmation string will not authorize it. If you hold no "
+                "grant, call once WITHOUT authorization and report the refusal."
+            )
         tools.append(
             {
                 "name": spec.name,
@@ -138,18 +157,66 @@ async def execute_tool(
     spec = registry[name]
     payload = dict(arguments)
     confirmation = payload.pop("confirmation", None)
+    authorization = payload.pop("authorization", None)
+    grant_id = authorization.get("grant_id") if isinstance(authorization, dict) else None
     try:
         handle = await client.submit(
             spec.name,
             payload,
             confirmation=str(confirmation) if confirmation is not None else None,
+            authorization=str(grant_id) if grant_id is not None else None,
         )
         result = await handle.result(timeout=120.0)
     except (LabwireError, TimeoutError) as exc:
+        details = getattr(exc, "details", None)
+        if details:
+            # Flattening would destroy request_id, did_you_mean, and the
+            # ready-to-send read; the recovery path lives in these fields.
+            return json.dumps(
+                {"error": str(exc), "category": getattr(exc, "category", None), "details": details}
+            )
         return f"ERROR: {exc}"
     if spec.name in {"transfer", "dispense"}:
         transfers.append(handle.command_id)
     return json.dumps(result)
+
+
+def _pending_request_id(results: list[dict[str, Any]]) -> str | None:
+    """The request id of an authorization_required refusal, if one just happened."""
+    for entry in results:
+        content = entry.get("content")
+        if not isinstance(content, str) or "authorization_required" not in content:
+            continue
+        try:
+            details = json.loads(content).get("details", {})
+        except ValueError:
+            continue
+        if details.get("reason") == "absent" and details.get("request_id"):
+            return str(details["request_id"])
+    return None
+
+
+def _operator_approves(rig: DilutionRig, request_id: str) -> str:
+    """The operator role: approve one pending request from the server's store.
+
+    NOTE: demo and operator run as one user on one machine here; nothing in
+    this process enforces the separation. On a real bench the store lives
+    where the agent cannot write it.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from labwire.core import GrantStore
+
+    store = GrantStore(rig.grant_dir, serial_number="lh_deck")
+    grant = store.approve(
+        request_id,
+        now=datetime.now(UTC),
+        ttl=timedelta(minutes=15),
+        max_uses=1,
+        issued_by="operator",
+    )
+    print(f"  [operator] approved {request_id} -> grant {grant.grant_id[:10]}... (1 use)")
+    return grant.grant_id
 
 
 async def prepare(rig: DilutionRig, steps: int) -> None:
@@ -179,6 +246,7 @@ async def run_claude(rig: DilutionRig, api_key: str, steps: int, transfers: list
     messages: list[dict[str, Any]] = [
         {"role": "user", "content": "The deck is loaded. Run the dilution series."}
     ]
+    operator_acted = False
     for _ in range(MAX_ROUNDS):
         response = await anthropic.messages.create(
             model=model,
@@ -199,6 +267,25 @@ async def run_claude(rig: DilutionRig, api_key: str, steps: int, transfers: list
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": output})
         messages.append({"role": "assistant", "content": response.content})
         if response.stop_reason != "tool_use":
+            # If the agent stopped because an S3 call was refused, the OPERATOR
+            # (this harness, playing that role on the same machine) approves
+            # the pending request and hands the agent a single-use grant id.
+            request_id = _pending_request_id(results)
+            if request_id and not operator_acted:
+                operator_acted = True
+                grant_id = _operator_approves(rig, request_id)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Operator here. I reviewed request {request_id} on the "
+                            f"instrument host and approved it: grant id {grant_id}, "
+                            "single use, expires in 15 minutes. Proceed with exactly "
+                            "the call you reported."
+                        ),
+                    }
+                )
+                continue
             break
         messages.append({"role": "user", "content": results})
 
@@ -231,6 +318,7 @@ async def main() -> None:
         else:
             print("ANTHROPIC_API_KEY not set - falling back to the scripted dilution\n")
             await run_scripted(rig, steps, transfers)
+            transfers.append(await gripper_act(rig))
 
         snapshot = await rig.client.read_resource("labwire:deck")
         print("\nfinal deck contents:")

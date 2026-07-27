@@ -31,6 +31,7 @@ from rig import (
     DilutionRig,
     demo_steps,
     dilution_wells,
+    gripper_act,
 )
 
 
@@ -120,11 +121,29 @@ async def main() -> None:
         mounted = sum(1 for channel in state["channels"] if channel["has_tip"])
         print(f"\n    channels holding a tip: {mounted} (every tip was discarded)")
 
-        bundle = rig.bundle_for(transfer_runs[-1])
+        move_run = await gripper_act(rig)
+
+        bundle = rig.bundle_for(move_run)
         print(f"\nsigned evidence: {bundle}")
         result = verify_bundle(bundle)
         status = "OK - authentic" if result.ok else f"FAILED: {'; '.join(result.errors)}"
         print(f"  labwire verify: {status}")
+        import json as _json
+
+        manifest = _json.loads((bundle / "manifest.json").read_text())
+        auth = manifest.get("authorization", {})
+        print(
+            f"  command        {manifest['command']['name']}   "
+            f"safety_class {manifest['command']['safety_class']}"
+        )
+        print(
+            f"  authorization  mode={auth.get('mode')}  use {auth.get('use_index')}/1  "
+            f'issued_by "{auth.get("issued_by")}" [unauthenticated note]'
+        )
+        print(
+            f"  identity_verified {auth.get('identity_verified')}   "
+            "<- deployment policy and parameter binding proven; NOT who"
+        )
         if not result.ok:
             raise SystemExit(1)
 

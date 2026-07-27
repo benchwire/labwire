@@ -1,6 +1,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,9 +21,15 @@ GRANT = "operator-standing-grant"
 
 
 @pytest.fixture
-async def served(rig: LiquidHandler) -> AsyncIterator[tuple[LiquidHandler, LabwireClient]]:
+async def served(
+    rig: LiquidHandler, tmp_path: Path
+) -> AsyncIterator[tuple[LiquidHandler, LabwireClient]]:
     """The rig served over the protocol, with an operator grant configured."""
-    server = InstrumentServer(PyLabRobotInstrument(rig), confirmation_token=GRANT)
+    server = InstrumentServer(
+        PyLabRobotInstrument(rig),
+        confirmation_token=GRANT,
+        grant_store=tmp_path / "grants",
+    )
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
     async with LabwireClient.attach(client_end) as client:
@@ -208,7 +215,13 @@ async def test_a_locked_plate_refuses_every_operation_touching_it(rig: LiquidHan
     annotations = AnnotationFile(
         resources={"labwire:deck/source_plate": ResourceAnnotation(locked=True)}
     )
-    server = InstrumentServer(PyLabRobotInstrument(rig, annotations), confirmation_token=GRANT)
+    import tempfile
+
+    server = InstrumentServer(
+        PyLabRobotInstrument(rig, annotations),
+        confirmation_token=GRANT,
+        grant_store=Path(tempfile.mkdtemp(prefix="labwire-grants-")),
+    )
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
     async with LabwireClient.attach(client_end) as client:
@@ -400,7 +413,10 @@ async def test_a_run_produces_a_verifiable_signed_bundle(rig: LiquidHandler, tmp
     from labwire.core.signing import verify_bundle
 
     server = InstrumentServer(
-        PyLabRobotInstrument(rig), confirmation_token=GRANT, manifest_dir=tmp_path
+        PyLabRobotInstrument(rig),
+        confirmation_token=GRANT,
+        manifest_dir=tmp_path,
+        grant_store=tmp_path / "grants",
     )
     client_end, server_end = MemoryTransport.pair()
     server.attach(server_end)
@@ -422,3 +438,229 @@ async def test_a_run_produces_a_verifiable_signed_bundle(rig: LiquidHandler, tmp
     assert manifest["command"]["name"] == "aspirate"
     assert manifest["command"]["safety_class"] == "S2"  # recorded, not just enforced
     assert manifest["command"]["params"]["volumes_ul"] == [60.0]
+
+
+# --- the gripper: S3, and the ceremony that makes it different --------------
+
+
+async def test_the_standing_s2_grant_does_not_move_a_plate(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    """The confirmation that moved 800 uL of liquid does not move one plate."""
+    from labwire.core import AuthorizationRequiredError
+
+    _rig, client = served
+    with pytest.raises(AuthorizationRequiredError) as caught:
+        await client.submit(
+            "move_plate",
+            {"plate": "labwire:deck/target_plate", "to": "labwire:deck/staging-0"},
+            confirmation=GRANT,
+        )
+    details = caught.value.details
+    assert details is not None
+    assert details["reason"] == "absent"
+    assert details["mintable_by_agent"] is False
+    assert details["request_id"].startswith("req-")
+
+
+async def test_an_approved_grant_moves_the_plate_and_binds_to_it(
+    rig: LiquidHandler, tmp_path: Path
+) -> None:
+    """Refusal, approval, success, and then the beat that proves the binding:
+    the same valid grant refused on different parameters."""
+    from datetime import timedelta
+
+    from labwire.core import AuthorizationRequiredError
+
+    server = InstrumentServer(
+        PyLabRobotInstrument(rig), confirmation_token=GRANT, grant_store=tmp_path / "g"
+    )
+    client_end, server_end = MemoryTransport.pair()
+    server.attach(server_end)
+    async with LabwireClient.attach(client_end) as client:
+        params = {"plate": "labwire:deck/target_plate", "to": "labwire:deck/staging-0"}
+        with pytest.raises(AuthorizationRequiredError) as refused:
+            await client.submit("move_plate", params)
+        assert refused.value.details is not None
+        request_id = refused.value.details["request_id"]
+
+        store = server._grant_store  # pyright: ignore[reportPrivateUsage]
+        assert store is not None
+        grant = store.approve(
+            request_id, now=server.clock.now(), ttl=timedelta(minutes=15), max_uses=2
+        )
+
+        handle = await client.submit("move_plate", params, authorization=grant.grant_id)
+        moved = await handle.result(timeout=20.0)
+        assert moved["to"] == "labwire:deck/staging-0"
+        assert moved["origin"] == "labwire:deck/deck"
+
+        # a valid, unexpired, correct-command grant on OTHER parameters
+        with pytest.raises(AuthorizationRequiredError) as mismatched:
+            await client.submit(
+                "move_plate",
+                {"plate": "labwire:deck/source_plate", "to": "labwire:deck/staging-1"},
+                authorization=grant.grant_id,
+            )
+        assert mismatched.value.details is not None
+        assert mismatched.value.details["reason"] == "params_mismatch"
+    await server.aclose()
+
+
+async def test_a_gripper_move_to_a_container_is_a_kind_mismatch(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    """A well is not a site, and the reference walk says so before authorization."""
+    from labwire.core import UnknownReferenceError
+
+    _rig, client = served
+    with pytest.raises(UnknownReferenceError) as caught:
+        await client.submit(
+            "move_plate",
+            {"plate": "labwire:deck/target_plate", "to": "labwire:deck/source_plate/A1"},
+        )
+    assert caught.value.details is not None
+    assert caught.value.details["reason"] == "kind_mismatch"
+
+
+async def test_gripper_moves_are_not_interruptible(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    _rig, client = served
+    descriptor = await client.describe()
+    movers = {c.name: c.interruptible for c in descriptor.commands}
+    assert movers["move_plate"] is False
+    assert movers["move_lid"] is False
+    assert movers["move_resource"] is False
+
+
+async def test_the_manifest_of_a_granted_run_records_the_ceremony(
+    rig: LiquidHandler, tmp_path: Path
+) -> None:
+    from datetime import timedelta
+
+    from labwire.core import AuthorizationRequiredError, verify_bundle
+
+    server = InstrumentServer(
+        PyLabRobotInstrument(rig),
+        confirmation_token=GRANT,
+        manifest_dir=tmp_path,
+        grant_store=tmp_path / "grants",
+    )
+    client_end, server_end = MemoryTransport.pair()
+    server.attach(server_end)
+    async with LabwireClient.attach(client_end) as client:
+        params = {"plate": "labwire:deck/target_plate", "to": "labwire:deck/staging-0"}
+        with pytest.raises(AuthorizationRequiredError) as refused:
+            await client.submit("move_plate", params)
+        assert refused.value.details is not None
+        store = server._grant_store  # pyright: ignore[reportPrivateUsage]
+        assert store is not None
+        grant = store.approve(
+            refused.value.details["request_id"],
+            now=server.clock.now(),
+            ttl=timedelta(minutes=15),
+            max_uses=1,
+            issued_by="priya",
+        )
+        handle = await client.submit("move_plate", params, authorization=grant.grant_id)
+        await handle.result(timeout=20.0)
+        bundle = tmp_path / handle.command_id
+    await server.aclose()
+
+    assert verify_bundle(bundle).ok
+    manifest = json.loads((bundle / "manifest.json").read_text())
+    assert manifest["command"]["safety_class"] == "S3"
+    auth = manifest["authorization"]
+    assert auth["mode"] == "grant"
+    assert auth["identity_verified"] is False
+    assert auth["use_index"] == 1
+    assert auth["issued_by"] == "priya"
+    assert "grant_id" not in json.dumps(manifest)  # a bearer value never lands in a bundle
+    assert manifest["command"]["params_digest"].startswith("sha256:")
+
+
+# --- discovery hygiene: the mechanical guards behind the no-hint claim ------
+#
+# The claim is that discovery ALONE leads an agent to the deck resource. These
+# tests cannot prove model behaviour, and do not try; they prove the
+# preconditions hold and cannot silently rot: nothing in the descriptor gives
+# an agent material to invent a reference from, and the pointer to the deck
+# rides inside every reference-taking parameter.
+
+
+async def test_no_reference_parameter_declares_a_pattern(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    """A pattern is satisfiable by invention; none may ride with a reference."""
+    _rig, client = served
+    descriptor = await client.describe()
+    for spec in descriptor.commands:
+        for path, _ref in spec.references():
+            assert "pattern" not in str(spec.params_schema), (spec.name, path)
+
+
+async def test_every_reference_points_at_a_declared_resource(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    _rig, client = served
+    descriptor = await client.describe()
+    declared = {r.uri: set(r.item_kinds) for r in descriptor.resources}
+    for spec in descriptor.commands:
+        for path, ref in spec.references():
+            assert ref["enumerated_by"] in declared, (spec.name, path)
+            assert ref["kind"] in declared[ref["enumerated_by"]], (spec.name, path)
+
+
+async def test_the_descriptor_contains_no_labware_names(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    """What mechanically prevents reintroducing an address grammar.
+
+    Labware names live in resource state, not in discovery, so the descriptor
+    holds no material to assemble a reference value from. The only
+    constructible prefix in an agent's context is labwire:deck, which is a
+    read, not a submit.
+    """
+    rig, client = served
+    descriptor = await client.describe()
+    text = descriptor.model_dump_json()
+    for name in {child.name for child in rig.deck.children}:
+        if "_" in name or "-" in name:
+            # A user-styled identifier appearing anywhere is a leak: it is the
+            # exact spelling a URI needs.
+            assert name not in text, f"descriptor leaks labware name {name!r}"
+        else:
+            # A common word (trash, tips, staging) may appear as English; what
+            # must not appear is any path spelling of it.
+            for spelled in (f"/{name}", f"{name}/"):
+                assert spelled not in text, f"descriptor spells a path with {name!r}"
+
+
+def test_the_agent_demo_prompt_contains_no_discovery_hints() -> None:
+    """The specification must not live in the prompt (finding F2).
+
+    The residual prompt may state the goal, the technique, and the safety
+    facts. It may not tell the agent to read the deck first, name the deck
+    resource, or spell any labware name the way a URI needs.
+    """
+    import re
+    from pathlib import Path
+
+    source = Path(__file__).parents[3].parents[0] / "examples" / "liquid_handling"
+    text = (source / "claude_dilution.py").read_text()
+    match = re.search(r'SYSTEM_PROMPT = f?"""(.*?)"""', text, re.DOTALL)
+    assert match is not None
+    prompt = match.group(1).lower()
+    for hint in (
+        "labwire:",
+        "deck",
+        "describe",
+        "resource",
+        "read",
+        "source_plate",
+        "dilution_plate",
+        "target_plate",
+        "tips/",
+    ):
+        assert hint not in prompt, f"prompt still hints: {hint!r}"

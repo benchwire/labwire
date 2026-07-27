@@ -36,6 +36,7 @@ _CATEGORY_KINDS = {
     "plate_carrier": "carrier",
     "tip_carrier": "carrier",
     "plate_holder": "site",
+    "lid": "lid",
     "deck": "deck",
 }
 
@@ -47,6 +48,7 @@ KIND_SETS: dict[str, list[str]] = {
     "trough": ["trough", "container", "labware"],
     "trash": ["trash", "labware"],
     "site": ["site"],
+    "lid": ["lid", "labware"],
     "carrier": ["labware"],
 }
 """Registered kind arrays per bridge classification; OTHER maps to none and
@@ -62,6 +64,7 @@ class LabwareKind(enum.StrEnum):
     TRASH = "trash"
     CARRIER = "carrier"
     SITE = "site"
+    LID = "lid"
     DECK = "deck"
     OTHER = "other"
     """Recognized as present, but of unknown purpose and not referenceable."""
@@ -381,6 +384,31 @@ def command_surface() -> list[DraftCommand]:
                 "human placed on the deck."
             ),
             safety_class="S1",
+        ),
+        DraftCommand(
+            name="move_plate",
+            description=(
+                "Grip a plate, lift it off its site, carry it across the deck, and set "
+                "it down on another site. The arm travels over whatever is in between; "
+                "a wrong destination is a collision, not a bad pipetting step."
+            ),
+            safety_class="S3",
+        ),
+        DraftCommand(
+            name="move_lid",
+            description=(
+                "Grip a plate lid and move it onto another plate or site. The arm "
+                "travels over whatever is in between."
+            ),
+            safety_class="S3",
+        ),
+        DraftCommand(
+            name="move_resource",
+            description=(
+                "Grip any labware and move it to a site. The most general gripper "
+                "operation, and exactly as capable of a collision as the others."
+            ),
+            safety_class="S3",
         ),
         DraftCommand(
             name="stop",
