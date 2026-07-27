@@ -24,34 +24,27 @@ conformance table (SPEC §15.2) rather than implied to exist.
 
 ## Modeling things, not only quantities
 
-Everything in this section comes from [SPEC-FINDINGS.md](SPEC-FINDINGS.md),
-the record of where protocol v0.2 strained while the PyLabRobot bridge was
-being built. That document has the reasoning and the failing cases; this is
-the work.
+Protocol v0.3 shipped the heart of this section: **resources** (typed,
+URI-identified, readable state, declared in discovery), **typed references**
+(the `resource_ref` keyword, validated against current state at submission),
+and **operator grants** (S3 authorization an agent cannot mint, bound to the
+LAP-credited parameter digest), plus `if_revision` optimistic concurrency.
+See [SPEC-FINDINGS.md](SPEC-FINDINGS.md) F1, F2, and F4 for what was built
+and the residuals. What remains here is deliberately deferred:
 
-- **Typed resource references** (finding F1, blocking). Units made a parameter
-  a volume in microlitres; nothing makes a parameter a well that exists on
-  this deck. A `reference_annotations` map declaring what kind of thing a
-  parameter names, and the command that enumerates the valid values, plus an
-  `unknown_reference` error category. Without it every bridge invents its own
-  address grammar, which is the fragmentation Labwire exists to end.
-- **A state document** (finding F2, blocking). `state/get`, a `state_schema`
-  in the descriptor, `notifications/state_changed` with a revision, and a
-  `state_revision` on command results so an agent can tell whether the deck it
-  planned against is the deck it acted on. Instrument state that is a tree has
-  nowhere to live today, so it goes in a command result that nothing marks as
-  special.
-- **Argument-dependent safety classes** (finding F3). Let a server compute an
-  effective class from validated parameters, bounded below by the declared
-  class, and report it in the `-32009` error. Dispensing into waste and
-  dispensing into a live culture are currently the same command.
-- **An `effects` declaration** (finding F6), orthogonal to S0 to S3, so
-  operations that change only the instrument's model of the world can be
-  described without misusing a scale that grades physical consequence.
-- **Preconditions in the descriptor** (finding F7), or at minimum an interlock
-  error that names the command clearing it in a structured field, so an agent
-  can order a plan correctly on the first attempt instead of discovering it by
-  failing.
+- **Kind registry governance.** SPEC Appendix A is seeded from one domain
+  and maintained by one project; a process for admitting kinds, and evidence
+  that a second ecosystem can express its references in the same vocabulary,
+  are both open.
+- **Cryptographic operator identity.** A JWS operator token signed over the
+  task and parameter digest, with key distribution and revocation, as LAP
+  specifies. v0.3 grants prove deployment policy plus parameter binding plus
+  a bounded window; they do not prove who.
+- **Resource index pagination.** A 1536-well plate is fine; a plate hotel of
+  thousands of positions has no good answer yet.
+- **Argument-dependent safety classes** (finding F3), an **effects
+  declaration** (F6), and **preconditions in the descriptor** (F7): still
+  out of scope, still recorded in SPEC-FINDINGS.
 
 ## Physical typing
 

@@ -16,6 +16,18 @@ interesting state is a tree. Everywhere the protocol strained is written down
 in [SPEC-FINDINGS.md](../../../SPEC-FINDINGS.md), which is the real output of
 this package.
 
+## What changed in v0.3
+
+The deck stopped being a command and became the `labwire:deck` **resource**:
+read it for typed content plus the index of everything a command parameter
+can reference. The invented `"plate/A1"` grammar is gone; references are
+URIs like `labwire:deck/source_plate/A1`, composed by one protocol-defined
+rule, declared with the `resource_ref` keyword instead of a regex, and
+validated by the server against a fresh read before a handler runs. And the
+**gripper ships**: `move_plate`, `move_lid`, `move_resource` at S3, which
+now means an operator grant an agent cannot mint, bound to the exact
+parameters of one call.
+
 ## Five-minute quickstart
 
 Nothing here needs hardware, a server, or a browser. From a checkout with
@@ -39,14 +51,14 @@ every piece of labware with what the annotation file says it holds.
 
 ```
 OK: LiquidHandlerChatterboxBackend (lh_deck)
-  8 channel(s), 8 piece(s) of labware
-    S0  describe_deck
+  8 channel(s), 9 piece(s) of labware
     S2  aspirate
     S2  dispense
     S1  set_well_volume
+    S3  move_plate
     S0  stop
-    tips: tip_rack 8x12  (96 tips)
-    source_plate: plate 8x12  (hazard: none)
+    labwire:deck/tips: tip_rack 8x12  (96 tips)
+    labwire:deck/source_plate: plate 8x12  (hazard: none)
 ```
 
 Serving it is a few lines:
@@ -63,27 +75,30 @@ async with server.serve_websocket("127.0.0.1", 9520):
 
 ## Addressing
 
-Everything an operation acts on is named `"<labware>/<item>"`:
+Everything an operation acts on is a URI under the deck resource:
 
 ```
-source_plate        the plate itself
-source_plate/A1     one well of it
-tips/H12            one tip spot
+labwire:deck                       the resource: read it
+labwire:deck/source_plate          labware standing on the deck
+labwire:deck/source_plate/A1       one well of it
+labwire:deck/tips/H12              one tip spot
 ```
 
-Two things are deliberately **not** accepted, both explained in
-[DESIGN.md](DESIGN.md). PyLabRobot's derived names (`source_plate_well_A1`)
-resolve internally but leak a naming rule an agent should not have to know, so
-they are refused with the canonical address in the error. And PyLabRobot's
-range syntax (`plate["A1:H1"]`) is not exposed, because JSON arrays already
-carry cardinality and one way to say a thing is better than two:
+Item URIs compose by the protocol rule (SPEC 10.1): entry URI, slash, an id
+from the read result's index, so an agent that can read an index can
+construct every legal reference with no grammar to learn. Two things are
+deliberately **not** accepted: PyLabRobot's derived names
+(`source_plate_well_A1`) are refused with the canonical URI, and its range
+syntax (`plate["A1:H1"]`) is not exposed, because JSON arrays already carry
+cardinality:
 
 ```json
-{"wells": ["source_plate/A1", "source_plate/B1"], "volumes_ul": [50.0, 50.0]}
+{"wells": ["labwire:deck/source_plate/A1"], "volumes_ul": [50.0]}
 ```
 
-Every failure names what would have worked. An unknown labware lists the deck;
-an unknown well reports the grid shape.
+Every failure names what would have worked, and the server's own refusal
+(`-32010`) adds the pointer, the expected kind, did_you_mean candidates,
+and a ready-to-send read request.
 
 ## The annotation file
 
@@ -102,25 +117,29 @@ commands:
 labware:
   Cor_96_wellplate_360ul_Fb: {description: A Costar 96-well plate.}
 resources:
-  acid_stock:
+  labwire:deck/acid_stock:
     description: 1 M hydrochloric acid.
     hazard: corrosive
-    safety_class: S3     # reported and recorded, NOT enforced: see below
-    locked: true         # refused outright, which v0.2 can enforce
+    locked: true         # refused outright; enforced
 ```
 
 Rules worth knowing:
 
 - **Merging is per field**, from the labware entry (keyed by PyLabRobot class
-  or model) to the resource entry (keyed by name), so an override touches only
-  what it names.
+  or model) to the resource entry (keyed by its deck URI), so an override
+  touches only what it names.
 - **Unknown keys, resources, and commands are errors.** An annotation naming a
   plate that is not on the deck is refused rather than ignored, because a
   silently dropped hazard annotation is the worst failure this file has.
-- **`locked` is enforced. `safety_class` here is not.** Locking a plate locks
-  all 96 of its wells and refuses every operation touching them. Raising a
-  resource to S3 changes what is reported and recorded and nothing else, for
-  the reason in LIMITATIONS.
+- **`locked` is enforced.** Locking a plate locks all 96 of its wells and
+  refuses every operation touching them.
+- **There is no per-resource `safety_class` any more.** It was documented in
+  three places as reported-but-not-enforced, and keeping a field that cannot
+  raise a call's class would be keeping a lie: argument-dependent classes are
+  finding F3, still out of scope. Command-level `safety_class` overrides now
+  genuinely bite, because raising a command to S3 makes it require an
+  operator grant. `hazard` appears in the deck resource content, where an
+  agent actually reads it.
 
 ## Mapping
 
@@ -128,12 +147,13 @@ Rules worth knowing:
 |---|---|
 | `LiquidHandler` | one instrument |
 | backend class name | `identity.model` |
-| deck and its labware | `describe_deck` result, safety class **S0** |
-| `Well` / `TipSpot` / `Plate` | an address string in command parameters |
+| deck and its labware | the `labwire:deck` resource (`resource/read`) |
+| `Well` / `TipSpot` / `Plate` | a `resource_ref`-typed URI in command parameters |
 | `aspirate` / `dispense` / `transfer` | commands, safety class **S2** |
 | `pick_up_tips` / `drop_tips` / `return_tips` / `discard_tips` | commands, **S2** |
-| volume tracker, per well | `describe_deck` contents, listed sparsely |
-| tip trackers, per channel | `describe_deck` channels |
+| `move_plate` / `move_lid` / `move_resource` | commands, **S3**: operator grant, not interruptible |
+| volume tracker, per well | deck resource content, listed sparsely |
+| tip trackers, per channel | deck resource content |
 | cumulative volume moved | telemetry channels, in `uL` |
 | `stop` | command, safety class **S0** |
 | `NoTipError` / `HasTipError` | `interlock` |
@@ -143,9 +163,13 @@ Rules worth knowing:
 | anything else | `hardware_fault` |
 
 Safety defaults lean toward friction. Everything that moves or consumes
-material is S2, so an agent must present an operator confirmation for each
-call; reads are S0; `stop` is S0 so recovery stays available while an
-interlock is tripped. An annotation may raise a class, never lower it.
+liquid is S2, so an agent must present an operator confirmation for each
+call. Everything that moves **labware through space** is S3: the failure
+mode is a collision, and each call takes a single-use operator grant bound
+to its exact parameters, which the demo shows being refused, approved,
+used, and then refused on different values. `stop` is S0 so recovery stays
+available while an interlock is tripped. An annotation may raise a class,
+never lower it.
 
 ## LIMITATIONS
 
@@ -158,12 +182,19 @@ Read this before believing anything above.
   instrument**. PyLabRobot's simulator backend was removed in favour of a
   websocket Visualizer that opens a browser, so chatterbox is the only honest
   hardware-free option.
-- **A hazard annotation is not enforced.** Labwire v0.2 gates S2 and S3
-  through the same confirmation stub, so raising a resource to S3 changes what
-  is reported and recorded, not what is permitted. `locked` is the only
-  escalation this protocol version can actually enforce, which is why it is a
-  hard refusal rather than a gradation. See
-  [SPEC-FINDINGS.md](../../../SPEC-FINDINGS.md), findings F3 and F4.
+- **Command-level S3 is enforced; resource-level hazard is not.** Getting
+  this distinction right matters more than the feature. An S3 *command*
+  requires a real operator grant now (finding F4, resolved). But annotating a
+  *resource* as hazardous still cannot raise the class of a call that touches
+  it, because safety classes are per command, not per argument: that is
+  finding F3, out of scope. `hazard` is surfaced to agents in the deck
+  content and `locked` is a hard refusal; neither is a gradation.
+- **Gripper destinations are validated against the index, not against
+  physics.** A grant authorizes a move the operator saw; nothing here checks
+  reachability, collision clearance, or what a real STARlet's rail geometry
+  permits. <!-- TODO-VERIFY: which rail range is a legal gripper destination
+  on a real STARlet, and whether a decked plate's footprint changes that;
+  never tested on hardware. -->
 - **Enabling tracking is process-wide.** The bridge turns on PyLabRobot's tip
   and volume trackers, because without them a liquid handler silently accepts
   physically impossible commands. PyLabRobot toggles both through module-level

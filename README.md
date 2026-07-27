@@ -8,7 +8,7 @@ lab equipment": one universal way for AI agents to **discover** an
 instrument's capabilities, **command** it, **stream** its measurements, and
 walk away with **cryptographically signed** proof of what was done.
 
-> Working title, protocol v0.2 draft. The wire protocol will change before
+> Working title, protocol v0.3 draft. The wire protocol will change before
 > 1.0. Feedback and prior-art corrections are very welcome; see
 > [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -28,9 +28,16 @@ buildable now:
   the exact telemetry recorded: portable, tamper-evident evidence of what
   instrument did what, verified by one CLI command.
 - **Safety and physical typing in the protocol.** Mandatory UCUM units on
-  every quantity, S0-S3 safety classes with confirmation required for
-  irreversible or hazardous actions, interlocks, cancellation, and typed
-  errors with retryability. All specified in the protocol, not vendor add-ons.
+  every quantity, S0-S3 safety classes where irreversible actions take an
+  operator confirmation and hazardous ones take an **operator grant an agent
+  cannot mint**, bound to the exact parameters, interlocks, cancellation, and
+  typed errors with retryability. All specified, not vendor add-ons.
+- **Things, not only quantities.** v0.3 adds **resources** (typed, readable
+  instrument state, like a liquid handler's deck) and **typed references**
+  (parameters that name a well or a site, validated against current state,
+  with errors that hand the agent the read that recovers). Designed so that
+  discovery alone leads an agent to the deck, with no prompt coaching; CI
+  enforces the preconditions, and the demo asserts the behaviour.
 - **Runnable by a stranger in 5 minutes.** Zero hardware: the reference
   implementation ships three realistic simulated instruments.
 
