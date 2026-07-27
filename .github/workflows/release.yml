@@ -58,6 +58,8 @@ jobs:
             files: "labwire_cli-*"
           - project: labwire-mcp
             files: "labwire_mcp-*"
+          - project: labwire-conformance
+            files: "labwire_conformance-*"
           - project: labwire-ophyd
             files: "labwire_ophyd-*"
           - project: labwire-pylabrobot

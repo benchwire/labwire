@@ -1,0 +1,41 @@
+name: Bug report
+description: Something in the reference implementation misbehaves.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. The fastest route to a fix is a reproduction we can run
+        without your hardware, which (since the simulators are first-class)
+        is almost always possible.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `pip show labwire-core | grep Version`, or the commit hash.
+      placeholder: 0.3.0
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Smallest script or command sequence that shows the problem, ideally against a simulated instrument.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+      description: If the spec says so, cite the section; if spec and implementation disagree, say which one you believe.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Full output or traceback, uncut.
+      render: text
+    validations:
+      required: true

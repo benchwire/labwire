@@ -9,7 +9,8 @@ that speak their wire protocols (`labwire-drivers`), and the `labwire` CLI
 (`labwire-cli`). This distribution contains no code of its own.
 
 Not included, install separately if wanted: `labwire-mcp` (MCP adapter),
-`labwire-ophyd` and `labwire-pylabrobot` (ecosystem bridges).
+`labwire-ophyd` and `labwire-pylabrobot` (ecosystem bridges), and
+`labwire-conformance` (prove any server implementation conformant).
 
 See the [repository README](https://github.com/benchwire/labwire) for the
 five-minute quickstart.

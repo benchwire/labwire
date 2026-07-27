@@ -1,0 +1,6 @@
+# Review routing. The spec and the safety-relevant core paths always get
+# a maintainer review.
+* @TheRoboMaster123
+/spec/ @TheRoboMaster123
+/packages/core/src/labwire/core/grants.py @TheRoboMaster123
+/packages/core/src/labwire/core/signing.py @TheRoboMaster123

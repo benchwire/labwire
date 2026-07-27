@@ -1,0 +1,48 @@
+name: Bridge proposal
+description: Propose exposing another instrument ecosystem as Labwire instruments.
+labels: [bridge]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Two bridges exist (ophyd, PyLabRobot) and each one stress-tested the
+        protocol in ways the last did not; a good bridge proposal names the
+        strain it expects. Read SPEC-FINDINGS.md first: it is the record of
+        what building bridges did to the spec.
+  - type: input
+    id: ecosystem
+    attributes:
+      label: Target ecosystem
+      description: Library or framework, with a link.
+      placeholder: e.g. yaqd, EPICS, Opentrons API
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: What shape is the instrument state?
+      description: Signal-shaped (scalar channels), tree-shaped (a deck of things), or something else? This decides which protocol features the bridge exercises.
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: What can it destroy?
+      description: Which operations are irreversible or hazardous, and how the S0-S3 classes would map.
+    validations:
+      required: true
+  - type: textarea
+    id: strain
+    attributes:
+      label: Where do you expect the protocol to strain?
+      description: The honest answer is the interesting one; "nowhere" has been wrong twice so far.
+  - type: dropdown
+    id: license_ok
+    attributes:
+      label: Dependency licensing
+      description: The bridged library must be installable as an optional dependency (never vendored) under a license compatible with Apache-2.0.
+      options:
+        - Permissive (MIT/BSD/Apache), fine as optional dependency
+        - Copyleft or unclear, needs discussion
+    validations:
+      required: true

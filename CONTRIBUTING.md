@@ -1,8 +1,23 @@
 # Contributing to Labwire
 
-Thanks for looking under the hood. Labwire is a v0.1 draft protocol plus a
+Thanks for looking under the hood. Labwire is a v0.3 draft protocol plus a
 reference implementation; the most valuable contributions right now are
-protocol feedback, prior-art corrections, and implementation bug reports.
+protocol feedback (there is an issue form for spec questions), independent
+implementations run against `labwire-conformance`, bridge proposals, and
+implementation bug reports.
+
+## For external contributors
+
+Fork, branch, PR against `main`. CI runs the full check suite on fork PRs
+automatically; it needs no secrets and no maintainer pre-approval, so a
+green fork PR means exactly what a green internal one does. If your change
+touches the spec, the grant store, or signing, expect a slower, pickier
+review (see CODEOWNERS): those paths are the product.
+
+Where the implementation has taught us the spec was wrong, the lesson is
+recorded in [SPEC-FINDINGS.md](SPEC-FINDINGS.md). If your work surfaces a
+place the protocol strains, writing the finding is as valuable as writing
+the fix, sometimes more.
 
 ## Getting set up
 
@@ -45,7 +60,10 @@ uv manages Python itself; no system Python needed.
   applicable.
 - `make check` must be green; CI runs it on Python 3.12 and 3.13.
 - Protocol-affecting changes must update spec, models, and the conformance
-  table (§15) together.
+  table (§15) together; if the change is checkable, add the check to
+  `labwire-conformance` in the same PR.
+- House prose style: plain sentences, no em or en dashes anywhere in the
+  repo, and limitations stated where the reader will actually see them.
 
 ## License
 
