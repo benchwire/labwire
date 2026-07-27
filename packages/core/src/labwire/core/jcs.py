@@ -1,4 +1,4 @@
-"""RFC 8785 (JCS) JSON canonicalization (SPEC §12.2).
+"""RFC 8785 (JCS) JSON canonicalization (SPEC §13.2).
 
 Vendored implementation (the algorithm is small and dependency-free): keys
 sort by code point, strings use minimal escaping with literal UTF-8, and
@@ -85,3 +85,20 @@ def jcs_canonical(value: Any) -> bytes:
         b'{"v":1}'
     """
     return jcs_dumps(value).encode()
+
+
+def params_digest(params: "dict[str, Any]") -> str:
+    """The SPEC §8.6 parameter digest: sha256 over RFC 8785 canonical JSON.
+
+    Computed over the normalized parameter object of SPEC §8.2, so the
+    digested thing and the recorded thing cannot disagree, and an auditor
+    can recompute it offline from a manifest. The binding of an operator
+    authorization to this digest is LAP's design, adopted with credit.
+
+    Example:
+        >>> params_digest({})
+        'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a'
+    """
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(jcs_canonical(params)).hexdigest()

@@ -37,24 +37,24 @@ async def test_channel_count_is_available_before_setup() -> None:
 
 async def test_assigned_labware_is_found_and_classified(rig: LiquidHandler) -> None:
     draft = introspect(rig)
-    assert draft.find("source_plate").kind is LabwareKind.PLATE
-    assert draft.find("tips").kind is LabwareKind.TIP_RACK
-    assert draft.find("trash").kind is LabwareKind.TRASH
+    assert draft.find("labwire:deck/source_plate").kind is LabwareKind.PLATE
+    assert draft.find("labwire:deck/tips").kind is LabwareKind.TIP_RACK
+    assert draft.find("labwire:deck/trash").kind is LabwareKind.TRASH
 
 
 async def test_a_plate_reports_its_grid_and_well_capacity(rig: LiquidHandler) -> None:
-    grid = introspect(rig).find("source_plate").grid
+    grid = introspect(rig).find("labwire:deck/source_plate").grid
     assert grid is not None
     assert grid == Grid(rows=8, columns=12, item_max_volume_ul=360.0)
     assert grid.item_count == 96
 
 
 async def test_labware_carries_its_pylabrobot_model(rig: LiquidHandler) -> None:
-    assert introspect(rig).find("source_plate").model == "Cor_96_wellplate_360ul_Fb"
+    assert introspect(rig).find("labwire:deck/source_plate").model == "Cor_96_wellplate_360ul_Fb"
 
 
 async def test_labware_reports_where_it_is_and_how_big_it_is(rig: LiquidHandler) -> None:
-    plate = introspect(rig).find("source_plate")
+    plate = introspect(rig).find("labwire:deck/source_plate")
     assert plate.location_mm is not None
     assert plate.location_mm[0] > 0
     assert plate.size_mm == (127.76, 85.48, 14.2)  # a standard SBS footprint
@@ -62,9 +62,9 @@ async def test_labware_reports_where_it_is_and_how_big_it_is(rig: LiquidHandler)
 
 async def test_wells_are_not_listed_as_labware(rig: LiquidHandler) -> None:
     """The projection lists what you address, not all 208 resources on the deck."""
-    addresses = {item.address for item in introspect(rig).labware}
-    assert "source_plate" in addresses
-    assert not any("/" in address for address in addresses)
+    addresses = {item.uri for item in introspect(rig).labware}
+    assert "labwire:deck/source_plate" in addresses
+    assert not any(address.count("/") > 1 for address in addresses)  # no wells
     assert len(addresses) < 15  # the raw tree has 200+ resources
 
 
@@ -81,7 +81,7 @@ async def test_the_projection_is_small_enough_to_give_an_agent(rig: LiquidHandle
 
 async def test_the_labware_a_user_loaded_introspects_cleanly(rig: LiquidHandler) -> None:
     """Nothing is reported against the plates and tips actually being used."""
-    flagged = {gap.address for gap in introspect(rig).unresolved}
+    flagged = {gap.uri for gap in introspect(rig).unresolved}
     assert not (flagged & {"source_plate", "target_plate", "tips"})
 
 
@@ -95,7 +95,10 @@ async def test_even_a_stock_deck_has_furniture_the_bridge_cannot_classify(
     """
     draft = introspect(rig)
     assert not draft.is_complete
-    assert {gap.address for gap in draft.unresolved} == {"waste_block", "core_grippers"}
+    assert {gap.uri for gap in draft.unresolved} == {
+        "labwire:deck/waste_block",
+        "labwire:deck/core_grippers",
+    }
     assert all(g.reason is UnresolvedReason.UNKNOWN_KIND for g in draft.unresolved)
 
 
@@ -112,7 +115,9 @@ async def test_labware_with_no_location_is_reported() -> None:
     handler = LiquidHandler(backend=LiquidHandlerChatterboxBackend(num_channels=1), deck=deck)
     deck.assign_child_resource(Cor_96_wellplate_360ul_Fb(name="unplaced_plate"), location=None)
 
-    gaps = [gap for gap in introspect(handler).unresolved if gap.address == "unplaced_plate"]
+    gaps = [
+        gap for gap in introspect(handler).unresolved if gap.uri == "labwire:deck/unplaced_plate"
+    ]
     assert UnresolvedReason.NO_LOCATION in {gap.reason for gap in gaps}
     assert any("assign it before serving" in gap.message for gap in gaps)
 
@@ -120,9 +125,9 @@ async def test_labware_with_no_location_is_reported() -> None:
 async def test_unrecognized_labware_stays_addressable_and_is_flagged(rig: LiquidHandler) -> None:
     """The STARlet's waste block has no category PyLabRobot names."""
     draft = introspect(rig)
-    block = draft.find("waste_block")
+    block = draft.find("labwire:deck/waste_block")
     assert block.kind is LabwareKind.OTHER
-    reasons = {g.reason for g in draft.unresolved if g.address == "waste_block"}
+    reasons = {g.reason for g in draft.unresolved if g.uri == "labwire:deck/waste_block"}
     assert UnresolvedReason.UNKNOWN_KIND in reasons
 
 
@@ -141,11 +146,15 @@ def test_material_moving_commands_are_s2() -> None:
         assert classes[name] == "S2", name
 
 
-def test_reads_and_stop_are_s0() -> None:
-    """stop must stay submittable while an interlock is tripped (SPEC 8.6)."""
+def test_stop_is_s0_and_the_deck_is_not_a_command() -> None:
+    """stop must stay submittable while an interlock is tripped (SPEC 8.6).
+
+    describe_deck is gone: the deck is the labwire:deck resource now, read
+    rather than commanded, so nothing marks it S-anything.
+    """
     classes = {c.name: c.safety_class for c in command_surface()}
     assert classes["stop"] == "S0"
-    assert classes["describe_deck"] == "S0"
+    assert "describe_deck" not in classes
 
 
 def test_declaring_a_wells_contents_is_s1_because_it_moves_nothing() -> None:
@@ -154,15 +163,23 @@ def test_declaring_a_wells_contents_is_s1_because_it_moves_nothing() -> None:
     assert classes["set_well_volume"] == "S1"
 
 
+def test_the_command_surface_has_twelve_operations() -> None:
+    """describe_deck became the deck resource; the three gripper moves joined."""
+    assert len(command_surface()) == 12
+
+
 def test_the_untyped_backend_passthrough_is_not_exposed() -> None:
     """Every PyLabRobot operation takes **backend_kwargs straight to vendor firmware."""
     names = {c.name for c in command_surface()}
     assert not any("backend" in name or "kwargs" in name for name in names)
 
 
-def test_gripper_moves_are_not_exposed_in_this_version() -> None:
-    names = {c.name for c in command_surface()}
-    assert not (names & {"move_plate", "move_lid", "move_resource"})
+def test_gripper_moves_are_exposed_and_hazardous() -> None:
+    """The condition LIMITATIONS documented is met: real S3 exists (SPEC 8.6)."""
+    classes = {c.name: c.safety_class for c in command_surface()}
+    assert classes["move_plate"] == "S3"
+    assert classes["move_lid"] == "S3"
+    assert classes["move_resource"] == "S3"
 
 
 def test_every_command_has_a_description() -> None:
@@ -173,6 +190,6 @@ async def test_the_command_surface_does_not_depend_on_the_deck(rig: LiquidHandle
     """PyLabRobot's frontend is one class, so there is nothing to discover."""
     before = introspect(rig).commands
     rig.deck.assign_child_resource(
-        Cor_96_wellplate_360ul_Fb(name="extra"), location=Coordinate(600, 200, 100)
+        Cor_96_wellplate_360ul_Fb(name="extra"), location=Coordinate(700, 300, 100)
     )
     assert introspect(rig).commands == before

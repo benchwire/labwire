@@ -107,7 +107,7 @@ def check(
         if item.tips_available is not None:
             notes.append(f"{item.tips_available} tips")
         suffix = f"  ({', '.join(notes)})" if notes else ""
-        typer.echo(f"    {item.address}: {item.kind}{grid}{suffix}")
+        typer.echo(f"    {item.uri}: {item.kind}{grid}{suffix}")
 
     for gap in draft.unresolved:
         typer.echo(f"  note: {gap.message}", err=True)

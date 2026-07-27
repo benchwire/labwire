@@ -61,7 +61,7 @@ class JsonRpcResponse(_Envelope):
 
 
 class ErrorData(BaseModel):
-    """The ``data`` member of a Labwire error (SPEC §11.2).
+    """The ``data`` member of a Labwire error (SPEC §12.2).
 
     Example:
         >>> ErrorData(category="busy", retryable=True).category

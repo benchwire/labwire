@@ -21,9 +21,9 @@ Example:
     >>> # deck_state(lh, AnnotationFile()).channels[0].has_tip
 """
 
-from typing import Any
+from typing import Annotated, Any
 
-from labwire.bridges.pylabrobot.addressing import address_of
+from labwire.bridges.pylabrobot.addressing import DECK_URI, uri_of
 from labwire.bridges.pylabrobot.annotations import AnnotationFile, annotation_for
 from labwire.bridges.pylabrobot.introspect import (
     DraftLabware,
@@ -32,7 +32,12 @@ from labwire.bridges.pylabrobot.introspect import (
     addressable_resources,
     introspect,
 )
-from pydantic import BaseModel, ConfigDict
+from labwire.core.messages import ResourceIndexChildren, ResourceIndexEntry
+from labwire.core.server import unit_field
+from pydantic import BaseModel, ConfigDict, Field
+
+Mm = Annotated[float, Field(json_schema_extra={"unit": "mm"})]
+"""A millimetre coordinate; per-element so a tuple's items each carry a unit."""
 
 
 class ChannelState(BaseModel):
@@ -45,9 +50,9 @@ class ChannelState(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    index: int
+    index: int = unit_field("1")
     has_tip: bool
-    tip_max_volume_ul: float | None = None
+    tip_max_volume_ul: float | None = unit_field("uL", default=None)
     """Capacity of the mounted tip, which bounds a single aspiration."""
 
 
@@ -58,15 +63,15 @@ class WellContents(BaseModel):
     has been told and what it has moved, and cannot see into a plate.
 
     Example:
-        >>> WellContents(address="plate/A1", volume_ul=200.0).volume_ul
+        >>> WellContents(uri="labwire:deck/plate/A1", volume_ul=200.0).volume_ul
         200.0
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    address: str
-    volume_ul: float
-    max_volume_ul: float | None = None
+    uri: str
+    volume_ul: float = unit_field("uL")
+    max_volume_ul: float | None = unit_field("uL", default=None)
 
 
 class LabwareState(BaseModel):
@@ -78,20 +83,22 @@ class LabwareState(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    address: str
+    uri: str
+    kinds: list[str]
+    """Registered kinds this labware satisfies, most specific first; empty
+    for deck furniture the bridge cannot classify (visible, not
+    referenceable)."""
     kind: LabwareKind
     type_name: str
     model: str | None = None
-    location_mm: tuple[float, float, float] | None = None
+    location_mm: tuple[Mm, Mm, Mm] | None = None
     grid: Grid | None = None
     description: str | None = None
     hazard: str | None = None
     """What the annotation file says this holds, surfaced so an agent can see it."""
-    safety_class: str | None = None
-    """Effective class for operations touching this labware, when annotated."""
     locked: bool = False
     """Operations touching this labware are refused outright."""
-    tips_available: int | None = None
+    tips_available: int | None = unit_field("1", default=None)
     """For a tip rack: how many spots still hold a tip."""
 
 
@@ -109,16 +116,16 @@ class DeckState(BaseModel):
     contents: list[WellContents]
     """Only wells believed to hold liquid; an empty deck projects an empty list."""
 
-    def find(self, address: str) -> LabwareState:
-        """Look up labware by address.
+    def find(self, uri: str) -> LabwareState:
+        """Look up labware by URI.
 
         Example:
-            >>> # deck_state(lh, annotations).find("source_plate").kind
+            >>> # deck_state(lh, annotations).find("labwire:deck/source_plate").kind
         """
         for candidate in self.labware:
-            if candidate.address == address:
+            if candidate.uri == uri:
                 return candidate
-        raise KeyError(f"no such labware: {address!r}")
+        raise KeyError(f"no such labware: {uri!r}")
 
 
 def _volume_of(well: Any) -> float | None:
@@ -161,12 +168,13 @@ def _channel_states(liquid_handler: Any) -> list[ChannelState]:
 def _labware_state(resource: Any, draft: DraftLabware, annotations: AnnotationFile) -> LabwareState:
     annotation = annotation_for(
         annotations,
-        name=draft.address,
+        uri=draft.uri,
         model=draft.model,
         type_name=draft.type_name,
     )
     return LabwareState(
-        address=draft.address,
+        uri=draft.uri,
+        kinds=draft.kind.kinds(),
         kind=draft.kind,
         type_name=draft.type_name,
         model=draft.model,
@@ -174,7 +182,6 @@ def _labware_state(resource: Any, draft: DraftLabware, annotations: AnnotationFi
         grid=draft.grid,
         description=annotation.description,
         hazard=annotation.hazard,
-        safety_class=annotation.safety_class,
         locked=annotation.locked,
         tips_available=(_tips_available(resource) if draft.kind is LabwareKind.TIP_RACK else None),
     )
@@ -188,12 +195,12 @@ def deck_state(liquid_handler: Any, annotations: AnnotationFile | None = None) -
     """
     annotations = annotations or AnnotationFile()
     draft = introspect(liquid_handler)
-    by_address = {item.address: item for item in draft.labware}
+    by_uri = {item.uri: item for item in draft.labware}
 
     labware: list[LabwareState] = []
     contents: list[WellContents] = []
     for resource in addressable_resources(liquid_handler):
-        described = by_address.get(address_of(resource))
+        described = by_uri.get(uri_of(resource))
         if described is None:  # pragma: no cover - introspect covers the same set
             continue
         labware.append(_labware_state(resource, described, annotations))
@@ -206,7 +213,7 @@ def deck_state(liquid_handler: Any, annotations: AnnotationFile | None = None) -
             maximum = getattr(item, "max_volume", None)
             contents.append(
                 WellContents(
-                    address=address_of(item),
+                    uri=uri_of(item),
                     volume_ul=volume,
                     max_volume_ul=float(maximum) if isinstance(maximum, int | float) else None,
                 )
@@ -216,6 +223,56 @@ def deck_state(liquid_handler: Any, annotations: AnnotationFile | None = None) -
         labware=labware,
         channels=_channel_states(liquid_handler),
         contents=contents,
+    )
+
+
+def deck_index(liquid_handler: Any) -> list[ResourceIndexEntry]:
+    """The reference index of ``labwire:deck`` (SPEC §10.2).
+
+    Every container, tip site, labware, and site a command parameter can name
+    is here; deck furniture the bridge cannot classify stays in content but
+    out of the index, so it is visible without being referenceable.
+
+    Example:
+        >>> # deck_index(lh)[0].uri
+    """
+    entries: list[ResourceIndexEntry] = []
+    for item in introspect(liquid_handler).labware:
+        kinds = item.kind.kinds()
+        if not kinds:
+            continue  # unclassifiable furniture is not a reference target
+        children = None
+        if item.grid is not None and item.kind in (LabwareKind.PLATE, LabwareKind.TIP_RACK):
+            child_kinds = ["tip_site"] if item.kind is LabwareKind.TIP_RACK else ["container"]
+            rows, columns = item.grid.rows, item.grid.columns
+            ids = [
+                f"{chr(ord('A') + row)}{column + 1}"
+                for column in range(columns)
+                for row in range(rows)
+            ]
+            children = ResourceIndexChildren(kinds=child_kinds, ids=ids)
+        entries.append(
+            ResourceIndexEntry(
+                uri=item.uri,
+                kinds=kinds,
+                title=item.uri.rsplit("/", 1)[1],
+                children=children,
+            )
+        )
+    return entries
+
+
+def deck_snapshot(liquid_handler: Any, annotations: AnnotationFile | None = None) -> Any:
+    """Index and content together, for the resource reader.
+
+    Example:
+        >>> # ResourceSnapshot-shaped: deck_snapshot(lh).content
+    """
+    from labwire.core import ResourceSnapshot
+
+    return ResourceSnapshot(
+        index=deck_index(liquid_handler),
+        content=deck_state(liquid_handler, annotations),
     )
 
 
@@ -237,7 +294,7 @@ def locked_labware(annotations: AnnotationFile, resources: list[Any]) -> list[st
             owner = parent
         annotation = annotation_for(
             annotations,
-            name=str(owner.name),
+            uri=f"{DECK_URI}/{owner.name}",
             model=getattr(owner, "model", None),
             type_name=type(owner).__name__,
         )

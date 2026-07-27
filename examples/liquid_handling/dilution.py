@@ -31,6 +31,7 @@ from rig import (
     DilutionRig,
     demo_steps,
     dilution_wells,
+    gripper_act,
 )
 
 
@@ -49,16 +50,17 @@ async def show_capabilities(rig: DilutionRig) -> None:
 
 
 async def show_deck(rig: DilutionRig, heading: str) -> dict[str, Any]:
-    """Read the deck over the protocol and print what is on it."""
-    state, _run = await rig.call("describe_deck")
-    print(f"\n{heading}")
+    """Read the labwire:deck resource and print what is on it."""
+    snapshot = await rig.client.read_resource("labwire:deck")
+    state: dict[str, Any] = snapshot.content
+    print(f"\n{heading}  (revision {snapshot.revision})")
     for item in state["labware"]:
         if item["kind"] not in {"plate", "tip_rack"}:
             continue
         extra = f"{item['tips_available']} tips left" if item["kind"] == "tip_rack" else ""
         grid = item.get("grid") or {}
         shape = f"{grid.get('rows')}x{grid.get('columns')}" if grid else ""
-        print(f"    {item['address']:16} {item['kind']:9} {shape:6} {extra}")
+        print(f"    {item['uri']:36} {item['kind']:9} {shape:6} {extra}")
     return state
 
 
@@ -82,7 +84,9 @@ async def main() -> None:
         # PyLabRobot cannot see into a plate a human placed on the deck, so the
         # run starts by telling it what is there. This moves nothing (S1).
         wells = dilution_wells(steps)
-        await rig.call("set_well_volume", {"well": "source_plate/A1", "volume_ul": DYE_VOLUME_UL})
+        await rig.call(
+            "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": DYE_VOLUME_UL}
+        )
         for well in wells:
             await rig.call("set_well_volume", {"well": well, "volume_ul": DILUENT_VOLUME_UL})
         print(
@@ -91,10 +95,10 @@ async def main() -> None:
         )
 
         print("\nserial dilution, fresh tip per step:")
-        source = "source_plate/A1"
+        source = "labwire:deck/source_plate/A1"
         transfer_runs: list[str] = []
         for index, target in enumerate(wells):
-            tip = f"tips/A{index + 1}"
+            tip = f"labwire:deck/tips/A{index + 1}"
             await rig.call("pick_up_tips", {"tip_spots": [tip]})
             _result, run_id = await rig.call(
                 "transfer",
@@ -112,16 +116,34 @@ async def main() -> None:
         state = await show_deck(rig, "deck after the run:")
         print("\n    contents:")
         for well in state["contents"]:
-            print(f"        {well['address']:20} {well['volume_ul']:7.1f} uL")
+            print(f"        {well['uri']:36} {well['volume_ul']:7.1f} uL")
 
         mounted = sum(1 for channel in state["channels"] if channel["has_tip"])
         print(f"\n    channels holding a tip: {mounted} (every tip was discarded)")
 
-        bundle = rig.bundle_for(transfer_runs[-1])
+        move_run = await gripper_act(rig)
+
+        bundle = rig.bundle_for(move_run)
         print(f"\nsigned evidence: {bundle}")
         result = verify_bundle(bundle)
         status = "OK - authentic" if result.ok else f"FAILED: {'; '.join(result.errors)}"
         print(f"  labwire verify: {status}")
+        import json as _json
+
+        manifest = _json.loads((bundle / "manifest.json").read_text())
+        auth = manifest.get("authorization", {})
+        print(
+            f"  command        {manifest['command']['name']}   "
+            f"safety_class {manifest['command']['safety_class']}"
+        )
+        print(
+            f"  authorization  mode={auth.get('mode')}  use {auth.get('use_index')}/1  "
+            f'issued_by "{auth.get("issued_by")}" [unauthenticated note]'
+        )
+        print(
+            f"  identity_verified {auth.get('identity_verified')}   "
+            "<- deployment policy and parameter binding proven; NOT who"
+        )
         if not result.ok:
             raise SystemExit(1)
 

@@ -174,7 +174,7 @@ class JsonRpcSession:
         try:
             message = parse_message(raw)
         except Exception as exc:
-            # Invalid envelope: answer -32600 (SPEC §11.1). Echo the id when
+            # Invalid envelope: answer -32600 (SPEC §12.1). Echo the id when
             # it is a valid integer; JSON-RPC prescribes id null otherwise.
             if "id" in raw:
                 raw_id = raw.get("id")

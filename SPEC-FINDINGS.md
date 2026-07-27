@@ -12,12 +12,12 @@ on the deck this morning. Its interesting state is a tree. Building the
 whether the capability model generalizes, and this file is the result:
 everything that strained, written down while it was straining.
 
-Nine findings. Two are serious enough that a v0.3 which ignored them would be
-a protocol for detectors wearing the clothes of a general standard. Three are
-small and cheap, and one of those (F5, a hole in the mandatory-unit guarantee)
-was serious enough to fix immediately and shipped in 0.2.1. The last section
-lists what did *not* strain, which matters just as much and is the part a
-findings document usually leaves out.
+Nine findings. The two blocking ones (F1, F2) and the enforcement gap behind
+the safety story (F4) drove protocol v0.3 and are resolved there, each with
+its residual stated in place. F5 was a hole in the v0.2 headline guarantee,
+fixed immediately in 0.2.1. The last section lists what did *not* strain,
+which matters just as much and is the part a findings document usually
+leaves out.
 
 Findings are kept here after they are fixed, marked resolved with what
 changed. This file is a record of what the protocol got wrong, not a task
@@ -25,10 +25,10 @@ list; the work itself is scheduled in [ROADMAP.md](ROADMAP.md).
 
 | | Finding | Severity |
 |---|---|---|
-| F1 | Resource references cannot be typed the way numbers can | blocking |
-| F2 | State that is a tree has nowhere to live | blocking |
+| F1 | Resource references cannot be typed the way numbers can | **resolved in 0.3** |
+| F2 | State that is a tree has nowhere to live | **resolved in 0.3** |
 | F3 | Safety class is static when the risk is in the arguments | significant |
-| F4 | S2 and S3 are indistinguishable in enforcement | significant |
+| F4 | S2 and S3 are indistinguishable in enforcement | **resolved in 0.3** |
 | F5 | Mandatory units do not recurse into arrays | **resolved in 0.2.1** |
 | F6 | Operations with no physical consequence have no class | small |
 | F7 | Preconditions are discoverable only by failing | small, cheap |
@@ -39,7 +39,27 @@ list; the work itself is scheduled in [ROADMAP.md](ROADMAP.md).
 
 ## F1. Resource references cannot be typed the way numbers can
 
-**Severity: blocking.** This is the finding that generalizes furthest.
+**Severity: blocking. RESOLVED in protocol v0.3.** This is the finding that
+generalized furthest, and it drove the version.
+
+> **Resolved 2026-07-27.** v0.3 gives references the treatment units got,
+> though not in the shape this finding recommended: instead of a sidecar
+> `reference_annotations` map, the `resource_ref` keyword rides on the
+> parameter's own schema node, following W3C Thing Description practice of
+> putting semantics inside the affordance's data schema. The sidecar form
+> was tried on paper and rejected because every adapter would have to
+> remember to flatten it into prose, and it would hit the same nested-object
+> wall `unit_annotations` did. The bridge's invented grammar is deleted;
+> URIs compose by one protocol rule from a read result's index; the server
+> validates every reference against a fresh read at submission and refuses
+> with `-32010`, an RFC 6901 pointer, the expected kind, the longest
+> resolving prefix, did_you_mean candidates, and a ready-to-send read
+> request. **Residual, stated plainly:** the kind vocabulary (SPEC Appendix
+> A) is seeded from one domain and governed by nobody; until a second
+> ecosystem adopts it, cross-instrument portability of kinds is a design
+> intention, not a demonstrated fact. And validation is
+> time-of-check-to-time-of-use; `if_revision` narrows the window and
+> nothing closes it.
 
 Protocol v0.2 made a real advance by requiring UCUM units: a parameter is no
 longer "a number", it is a volume in microlitres, and a client that confuses
@@ -100,7 +120,24 @@ requires it to admit that some parameters point at instrument state.
 
 ## F2. State that is a tree has nowhere to live
 
-**Severity: blocking.**
+**Severity: blocking. RESOLVED in protocol v0.3.**
+
+> **Resolved 2026-07-27.** Resources are the home: declared in the
+> descriptor beside commands so discovery is not skippable, URI-identified,
+> read with `resource/read`, revisioned so staleness is detectable, and
+> indexed so typed references have something protocol-defined to resolve
+> against. The deck is `labwire:deck` now and `describe_deck` is deleted.
+> Change notification rides the event channel under a reserved name;
+> terminal command status returns the revisions the run changed, so a
+> single agent never re-reads between steps; `if_revision` refuses a stale
+> plan before any confirmation or grant is spent. The agent demo's prompt
+> no longer mentions the deck at all, and CI enforces that the prompt stays
+> hint-free and the descriptor leaks no labware names; whether discovery
+> alone actually leads a live model to the deck is a claim about model
+> behaviour, asserted in the demo rather than in CI, and the README words
+> it as designed-for, not verified. **Residual, stated plainly:** no
+> pagination (a plate hotel of thousands of positions has no good answer
+> yet), no reservation, and no lost-update protection beyond `if_revision`.
 
 An agent cannot plan a transfer without knowing what is on the deck. Labwire
 v0.2 has exactly three places to put information, and the deck fits none:
@@ -212,7 +249,26 @@ run.
 
 ## F4. S2 and S3 are indistinguishable in enforcement
 
-**Severity: significant.** Known before this bridge; made concrete by it.
+**Severity: significant. RESOLVED in protocol v0.3.** Known before the
+bridge; made concrete by it; fixed by making the classes different
+mechanisms rather than different labels.
+
+> **Resolved 2026-07-27.** S2 keeps the session confirmation. S3 takes an
+> operator grant an agent structurally cannot produce: provisioned in a
+> server-side store the protocol has no method to write, bound to the
+> command and the RFC 8785 digest of its normalized parameters (LAP's
+> binding, credited), expiring, use-limited, consumed atomically. The
+> refusal records a pending request so the operator's approval tool reads
+> the real parameters from the server's own store, never from a digest
+> relayed through the agent that wants the approval, which closes the
+> digest-laundering hole found during design review. The manifest records
+> the ceremony with a REQUIRED `identity_verified: false`, and the demo
+> shows the beat that matters: a valid, unexpired grant refused on
+> different parameters. **Residual, stated plainly:** a grant id is a
+> bearer value, `issued_by` is an unauthenticated label, and on one machine
+> nothing separates operator from agent but file permissions. v0.3 proves
+> deployment policy plus parameter binding plus a bounded window, and still
+> not identity; JWS operator tokens remain the successor.
 
 v0.2 gates S2 and S3 through the same confirmation stub. A correct
 confirmation satisfies both. So raising a command to S3 changes what is

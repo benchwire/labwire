@@ -4,6 +4,95 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
+## 0.3.0.dev0, unreleased
+
+Protocol version `"0.3"`: things, not only quantities. Driven by findings
+F1, F2, and F4 in [SPEC-FINDINGS.md](SPEC-FINDINGS.md), each now resolved
+there with its residual stated.
+
+### Added
+
+- **Resources** (SPEC §7.6, §10): URI-identified, typed, readable instrument
+  state, declared in the descriptor beside commands and read with
+  `resource/read`. Content schemas carry a scoped `unit` keyword so state is
+  as unit-mandatory as commands. Revisions are derived from the canonical
+  read result; `resource/changed` rides the event channel under a reserved
+  name. The liquid handler's deck is `labwire:deck`; the syringe pump gains
+  `labwire:syringe`, a consumable resource on an instrument with no
+  references at all, because the primitive is not deck-shaped.
+- **Typed references** (SPEC §7.2): the `resource_ref` schema keyword, with
+  `kind` matched against a registry (SPEC Appendix A) and `enumerated_by`
+  naming the resource whose index lists valid values. Closure is checked
+  before a descriptor is served; values resolve against a fresh read at
+  submission; the refusal (`-32010`) carries an RFC 6901 pointer, the
+  expected kind, the longest resolving prefix, `did_you_mean`, and a
+  ready-to-send read request. The SDK's `ResourceRef(...)` builds annotated
+  parameter types, so a bridge writes `source: Container` with no regex.
+- **Operator grants for S3** (SPEC §8.6): provisioned out of band in a store
+  the protocol has no method to write, bound to a command name and the RFC
+  8785 digest of its normalized parameters (a binding adopted from LAP with
+  credit), expiring and use-limited, consumed atomically. A refused S3
+  submission records a pending request; `labwire grant list | approve |
+  revoke` is the operator tool; the refusal (`-32011`) says
+  `mintable_by_agent: false` in a typed field. A server declaring S3
+  commands with no store refuses to start.
+- **Optimistic concurrency** (SPEC §10.5): `if_revision` on submit, refused
+  with `-32012` before any confirmation or grant is spent; terminal status
+  carries `resource_revisions`, so a single agent never re-reads between
+  steps.
+- **Gripper moves** in `labwire-pylabrobot`: `move_plate`, `move_lid`,
+  `move_resource` at S3, non-interruptible, with resource-typed parameters.
+  The demos show the ceremony beat by beat, ending with a valid grant
+  refused on different parameters. Exercised against the chatterbox backend
+  only, **never against physical hardware**.
+- The MCP adapter maps resources onto MCP resources, synthesizes a
+  model-callable read tool with an enum `uri`, distinguishes S2 confirmation
+  from S3 authorization in schemas and descriptions, and serializes error
+  details instead of flattening them.
+
+### Breaking
+
+- Protocol version is `"0.3"`; a v0.2 client and a v0.3 server do not
+  interoperate.
+- `InstrumentDescriptor.resources` is REQUIRED of servers (`[]` allowed).
+- **A `confirmation` no longer satisfies `S3`.** Deployments that raised a
+  command to S3 stop working until grants are provisioned; the failure is
+  loud (`-32011`, reason `absent`), never silent.
+- Submission precedence moves `interlock` and capacity ahead of
+  confirmation and authorization: everything knowable without an operator
+  is checked first (SPEC §12.1). A submit against a tripped interlock now
+  returns `-32003` where v0.2 returned `-32009`.
+- The error `data` requirement extends to `-32012` (SPEC §12.2).
+- **Manifests are `"0.3"`**: `command.params` records the **normalized**
+  parameters (v0.2 recorded the raw submission, so a command with defaulted
+  optionals signed a manifest describing something other than what ran),
+  plus `params_digest`, an `authorization` block with REQUIRED
+  `identity_verified: false`, and `resource_revisions`. Verifiers accept
+  0.2 and 0.3 bundles both; `labwire verify` refuses a 0.3 bundle claiming
+  identity was verified.
+- The `unit` and `resource_ref` schema keywords are claimed: `unit`
+  REQUIRED on numeric nodes in `content_schema` and forbidden in command
+  schemas; `resource_ref` permitted only in `params_schema`, never beside a
+  `pattern`.
+- `labwire-pylabrobot`: `describe_deck` is deleted (the deck is a
+  resource); the `"plate/A1"` address grammar is deleted (references are
+  `labwire:deck/...` URIs); the annotation file keys `resources:` by URI
+  and loses its per-resource `safety_class`, which was documented three
+  times as reported-but-not-enforced.
+
+### Migration
+
+- Instruments with no tree-shaped state: rebuild against 0.3 and change
+  nothing; the SDK supplies `resources: []`.
+- Instruments that exposed state through a command result: declare a
+  `resource(...)` with a content model, move the command's body into its
+  `@reader`, and delete the command.
+- Deployments using S3: provision a grant store (`grant_store=` or
+  `LABWIRE_GRANT_STORE`) and approve requests with `labwire grant`.
+- Clients: read `resources` from the descriptor; follow `enumerated_by`
+  from any `resource_ref` you cannot fill; treat `-32010`/`-32011`/`-32012`
+  per their `details`, which carry the recovery paths.
+
 ## 0.2.1, 2026-07-27
 
 Protocol version stays `"0.2"`: no message shape changed.
@@ -152,7 +241,7 @@ Physical typing and safety classification, adopted from
 
 - `confirmation` proves deployment policy, not operator identity. LAP-style
   cryptographic operator binding is a roadmap item; do not treat v0.2
-  confirmation as an audit control (SPEC §13).
+  confirmation as an audit control (SPEC §14).
 - Unit codes are validated for presence, not UCUM grammar.
 
 ## 0.1.0, 2026-07-23

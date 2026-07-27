@@ -159,8 +159,16 @@ async def test_initialize_result_and_gating() -> None:
                 "capabilities": {},
             },
         )
-        assert result["protocol_version"] == "0.2"
-        assert result["capabilities"] == {"telemetry": True, "events": True, "manifests": False}
+        assert result["protocol_version"] == "0.3"
+        # resources and grants advertise False until the server implements
+        # them (SPEC §6.1): a not-yet-implementing server must say so.
+        assert result["capabilities"] == {
+            "telemetry": True,
+            "events": True,
+            "manifests": False,
+            "resources": False,
+            "grants": False,
+        }
         await session.notify("notifications/initialized", {})
         desc = await session.request("instrument/describe", {})
         assert desc["identity"]["model"] == "TestRig-1"

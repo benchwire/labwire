@@ -68,6 +68,30 @@ blocks, JSON-LD/WoT-profiled capability documents, and the full operator
 token binding. All are roadmap candidates for Labwire, listed rather than
 claimed.
 
+## W3C Web of Things Thing Description, and JSON-LD
+
+Protocol v0.3's typed references and content units borrow one structural
+idea from **WoT Thing Description**: semantics belong *inside* an
+interaction affordance's data schema, not in a side table. That is why
+`resource_ref` and the content `unit` keyword ride on schema nodes rather
+than in sidecar maps, and the `unit` term itself follows TD practice.
+From **JSON-LD**, only the intuition that a value can be a typed link to a
+named node rather than a literal. Labwire is **not** JSON-LD: there is no
+`@context`, `labwire:` URIs are not IRIs into a shared vocabulary, and
+`kind` is matched within one instrument against a registry this project
+maintains alone. The intuition is borrowed; the machinery is deliberately
+not, because plain JSON Schema descriptors are what make Labwire commands
+directly consumable as MCP tool schemas. LAP profiles its InstrumentCard on
+WoT TD and is genuinely JSON-LD; that is the more standards-aligned design,
+at a cost in plainness this project chose not to pay yet.
+
+**MCP resources** are the direct ancestor of Labwire's resource primitive,
+reduced: declaration rides the descriptor rather than a list method, one
+read method, revisions instead of subscriptions. And v0.3's operator grants
+keep **LAP's** binding of an authorization to the capability and the SHA-256
+of canonical parameters, dropping (for now) the JWS signature; LAP's
+cryptographically bound operator tokens remain the more complete design.
+
 ## SCP (Science Context Protocol)
 
 **What it is:** "SCP: Accelerating Discovery with a Global Web of

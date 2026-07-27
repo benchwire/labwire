@@ -26,11 +26,11 @@ import asyncio
 import contextlib
 import functools
 from collections.abc import Awaitable
-from typing import Annotated, Any, cast
+from typing import Any, cast
 
-from labwire.bridges.pylabrobot.addressing import ADDRESS_PATTERN, resolve, resolve_all
+from labwire.bridges.pylabrobot.addressing import DECK_URI, resolve, resolve_all
 from labwire.bridges.pylabrobot.annotations import AnnotationFile, check
-from labwire.bridges.pylabrobot.deck import DeckState, deck_state, locked_labware
+from labwire.bridges.pylabrobot.deck import DeckState, deck_snapshot, locked_labware
 from labwire.bridges.pylabrobot.introspect import command_surface, introspect
 from labwire.core import (
     CanceledError,
@@ -39,20 +39,29 @@ from labwire.core import (
     Instrument,
     InterlockError,
     LabwireError,
+    ResourceRef,
+    ResourceSnapshot,
     ValidationError,
     channel,
     command,
+    resource,
 )
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict
 
 _POLL_S = 0.02
 
-Location = Annotated[str, StringConstraints(pattern=ADDRESS_PATTERN)]
-"""An address parameter, shape-checked by JSON Schema before it is resolved.
+Container = ResourceRef("container", enumerated_by=DECK_URI)
+TipSite = ResourceRef("tip_site", enumerated_by=DECK_URI)
+Labware = ResourceRef("labware", enumerated_by=DECK_URI)
+Site = ResourceRef("site", enumerated_by=DECK_URI)
+Lid = ResourceRef("lid", enumerated_by=DECK_URI)
+"""Typed reference parameter types (SPEC §7.2).
 
-The pattern is all JSON Schema can say. That a well exists on *this* deck is
-not expressible, so it is checked at resolution time and reported as a
-validation error naming what would have worked. See SPEC-FINDINGS.md.
+Until v0.3 the bridge published an invented address pattern here, which was
+finding F1: a grammar satisfiable by invention and private to this bridge.
+The `resource_ref` keyword replaces it. There is no pattern, so there is
+nothing to invent against, and the server validates each value against a
+fresh read of the deck before a handler ever runs.
 """
 
 
@@ -107,7 +116,7 @@ class TipResult(BaseModel):
     of a protocol. See SPEC-FINDINGS.md, finding F5.
 
     Example:
-        >>> TipResult(tip_spots=["tips/A1"], channels_used=[0]).channels_used
+        >>> TipResult(channels_used=[0]).channels_used
         [0]
     """
 
@@ -123,7 +132,7 @@ class LiquidResult(BaseModel):
     """What an aspirate or dispense moved.
 
     Example:
-        >>> LiquidResult(wells=["plate/A1"], total_volume_ul=50.0).total_volume_ul
+        >>> LiquidResult(wells=["w"], total_volume_ul=50.0).total_volume_ul
         50.0
     """
 
@@ -137,8 +146,8 @@ class TransferResult(BaseModel):
     """What a transfer moved, and where.
 
     Example:
-        >>> TransferResult(source="a/A1", targets=["b/A1"], total_volume_ul=10.0).source
-        'a/A1'
+        >>> TransferResult(source="s", targets=["t"], total_volume_ul=10.0).total_volume_ul
+        10.0
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -152,7 +161,7 @@ class WellVolumeResult(BaseModel):
     """The volume a well is now recorded as holding.
 
     Example:
-        >>> WellVolumeResult(well="plate/A1", volume_ul=200.0).volume_ul
+        >>> WellVolumeResult(well="w", volume_ul=200.0).volume_ul
         200.0
     """
 
@@ -160,6 +169,21 @@ class WellVolumeResult(BaseModel):
 
     well: str
     volume_ul: float
+
+
+class MoveResult(BaseModel):
+    """What a gripper move did: the thing, where it was, where it is now.
+
+    Example:
+        >>> MoveResult(moved="labwire:deck/p", origin="labwire:deck/a", to="labwire:deck/b").to
+        'labwire:deck/b'
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    moved: str
+    origin: str
+    to: str
 
 
 class StopResult(BaseModel):
@@ -189,6 +213,31 @@ class PyLabRobotBridge(Instrument):
     max_concurrent_commands = 1
     """A liquid handler has one arm; overlapping commands would be fiction."""
 
+    deck = resource(
+        DECK_URI,
+        kind="deck",
+        title="Deck",
+        description=(
+            "What is on the deck right now: the labware standing on it, what each "
+            "pipetting channel holds, and the volume of every container believed to "
+            "hold liquid. Every container, tip site, labware and site a command "
+            "parameter can name is listed in this resource's index. Changes whenever "
+            "labware or liquid moves."
+        ),
+        content_model=DeckState,
+        item_kinds=[
+            "labware",
+            "plate",
+            "tip_rack",
+            "trough",
+            "trash",
+            "lid",
+            "container",
+            "tip_site",
+            "site",
+        ],
+    )
+
     tips_mounted = channel(
         "tips_mounted",
         unit="1",
@@ -217,6 +266,10 @@ class PyLabRobotBridge(Instrument):
 
     # --- plumbing ----------------------------------------------------------
 
+    @deck.reader
+    def _read_deck(self) -> ResourceSnapshot:
+        return deck_snapshot(self._lh, self._annotations)
+
     def _publish_state(self) -> None:
         mounted = sum(
             1 for tracker in (getattr(self._lh, "head", None) or {}).values() if tracker.has_tip
@@ -224,6 +277,7 @@ class PyLabRobotBridge(Instrument):
         self.tips_mounted.publish(mounted)
         self.volume_aspirated_ul.publish(self._aspirated)
         self.volume_dispensed_ul.publish(self._dispensed)
+        self.deck.touch()
 
     def _refuse_locked(self, resources: list[Any]) -> None:
         """Refuse an operation that touches locked labware.
@@ -279,14 +333,10 @@ class PyLabRobotBridge(Instrument):
 
     # --- operations --------------------------------------------------------
 
-    async def do_describe_deck(self, ctx: CommandContext) -> DeckState:
-        """Project the deck. Pure read, no motion."""
-        return deck_state(self._lh, self._annotations)
-
     async def do_pick_up_tips(
         self,
         ctx: CommandContext,
-        tip_spots: list[Location],
+        tip_spots: list[TipSite],  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
         channels: list[int] | None = None,
     ) -> TipResult:
         """Mount tips from the named spots."""
@@ -301,7 +351,7 @@ class PyLabRobotBridge(Instrument):
     async def do_drop_tips(
         self,
         ctx: CommandContext,
-        tip_spots: list[Location],
+        tip_spots: list[TipSite],  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
         channels: list[int] | None = None,
     ) -> TipResult:
         """Drop the mounted tips at the named spots."""
@@ -326,7 +376,7 @@ class PyLabRobotBridge(Instrument):
     async def do_aspirate(
         self,
         ctx: CommandContext,
-        wells: list[Location],
+        wells: list[Container],  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
         volumes_ul: list[float],
         flow_rates_ul_s: list[float] | None = None,
     ) -> LiquidResult:
@@ -346,7 +396,7 @@ class PyLabRobotBridge(Instrument):
     async def do_dispense(
         self,
         ctx: CommandContext,
-        wells: list[Location],
+        wells: list[Container],  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
         volumes_ul: list[float],
         flow_rates_ul_s: list[float] | None = None,
     ) -> LiquidResult:
@@ -366,8 +416,8 @@ class PyLabRobotBridge(Instrument):
     async def do_transfer(
         self,
         ctx: CommandContext,
-        source: Location,
-        targets: list[Location],
+        source: Container,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        targets: list[Container],  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
         volumes_ul: list[float],
     ) -> TransferResult:
         """Move liquid from one well into others in a single command."""
@@ -387,7 +437,10 @@ class PyLabRobotBridge(Instrument):
         return TransferResult(source=source, targets=targets, total_volume_ul=total)
 
     async def do_set_well_volume(
-        self, ctx: CommandContext, well: Location, volume_ul: float
+        self,
+        ctx: CommandContext,
+        well: Container,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        volume_ul: float,
     ) -> WellVolumeResult:
         """Declare how much liquid a well already holds."""
         container = resolve(self._lh, well)
@@ -406,6 +459,46 @@ class PyLabRobotBridge(Instrument):
             raise map_error(exc) from exc
         return WellVolumeResult(well=well, volume_ul=volume_ul)
 
+    async def _move_gripped(
+        self, ctx: CommandContext, moved_uri: str, to_uri: str, op: str
+    ) -> MoveResult:
+        thing = resolve(self._lh, moved_uri)
+        destination = resolve(self._lh, to_uri)
+        self._refuse_locked([thing, destination])
+        origin_name = getattr(getattr(thing, "parent", None), "name", None)
+        origin = f"{DECK_URI}/{origin_name}" if origin_name else DECK_URI
+        operation = getattr(self._lh, op)
+        await self._operate(ctx, operation(thing, destination), op)
+        self._publish_state()
+        return MoveResult(moved=moved_uri, origin=origin, to=to_uri)
+
+    async def do_move_plate(
+        self,
+        ctx: CommandContext,
+        plate: Labware,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        to: Site,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+    ) -> MoveResult:
+        """Grip a plate and set it down on another site."""
+        return await self._move_gripped(ctx, plate, to, "move_plate")
+
+    async def do_move_lid(
+        self,
+        ctx: CommandContext,
+        lid: Lid,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        to: Labware,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+    ) -> MoveResult:
+        """Grip a plate lid and move it onto another plate."""
+        return await self._move_gripped(ctx, lid, to, "move_lid")
+
+    async def do_move_resource(
+        self,
+        ctx: CommandContext,
+        moved: Labware,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+        to: Site,  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
+    ) -> MoveResult:
+        """Grip any labware and move it to a site."""
+        return await self._move_gripped(ctx, moved, to, "move_resource")
+
     async def do_stop(self, ctx: CommandContext) -> StopResult:
         """Stop the liquid handler."""
         try:
@@ -416,7 +509,6 @@ class PyLabRobotBridge(Instrument):
 
 
 _IMPLEMENTATIONS: dict[str, str] = {
-    "describe_deck": "do_describe_deck",
     "pick_up_tips": "do_pick_up_tips",
     "drop_tips": "do_drop_tips",
     "return_tips": "do_return_tips",
@@ -425,6 +517,9 @@ _IMPLEMENTATIONS: dict[str, str] = {
     "dispense": "do_dispense",
     "transfer": "do_transfer",
     "set_well_volume": "do_set_well_volume",
+    "move_plate": "do_move_plate",
+    "move_lid": "do_move_lid",
+    "move_resource": "do_move_resource",
     "stop": "do_stop",
 }
 
@@ -440,19 +535,6 @@ _UNITS: dict[str, dict[str, str]] = {
 }
 
 _RETURNS_UNITS: dict[str, dict[str, str]] = {
-    # Keyed by path, because a deck projection is a tree and a quantity three
-    # levels down still needs a code. "1" marks a genuine count.
-    "describe_deck": {
-        "labware[].location_mm": "mm",
-        "labware[].grid.rows": "1",
-        "labware[].grid.columns": "1",
-        "labware[].grid.item_max_volume_ul": "uL",
-        "labware[].tips_available": "1",
-        "channels[].index": "1",
-        "channels[].tip_max_volume_ul": "uL",
-        "contents[].volume_ul": "uL",
-        "contents[].max_volume_ul": "uL",
-    },
     "pick_up_tips": {"channels_used[]": "1"},
     "drop_tips": {"channels_used[]": "1"},
     "return_tips": {"channels_used[]": "1"},
@@ -508,7 +590,7 @@ def PyLabRobotInstrument(
 
     check(
         annotations,
-        known_resources={item.address for item in draft.labware},
+        known_resources={item.uri for item in draft.labware},
         known_labware={item.type_name for item in draft.labware}
         | {item.model for item in draft.labware if item.model},
         known_commands={spec.name for spec in surface},
@@ -540,6 +622,9 @@ def PyLabRobotInstrument(
             ),
             description=(override.description if override else None) or spec.description,
             estimated_duration_s=(override.estimated_duration_s if override else None),
+            # A plate held in the gripper mid-traverse has no safe interruption;
+            # command/cancel on these returns -32007 instead (SPEC 8.3).
+            interruptible=spec.name not in {"move_plate", "move_lid", "move_resource"},
         )(implementation)
 
     generated = type("PyLabRobot_LiquidHandler", (PyLabRobotBridge,), namespace)

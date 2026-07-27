@@ -19,14 +19,35 @@ from labwire.core import (
     Instrument,
     InstrumentServer,
     InterlockError,
+    ResourceSnapshot,
     channel,
     command,
     interlock,
+    resource,
+    unit_field,
 )
 from labwire.drivers._lineproto import LineProtocolClient
-from pydantic import ConfigDict
+from pydantic import BaseModel, ConfigDict
 
 _POLL_S = 0.02
+
+
+class SyringeInfo(BaseModel):
+    """The installed syringe: the pump's one piece of tree-shaped state.
+
+    Deliberately present on an instrument with **no references at all**: the
+    resource primitive is not deck-shaped, and this exercises content typing,
+    the derived revision, and change notification without a single
+    resource_ref anywhere.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    capacity_ul: float = unit_field("uL")
+    barrel_diameter_mm: float = unit_field("mm")
+    installed_ul: float = unit_field("uL")
+    """How much the syringe currently holds, by the pump's own accounting."""
 
 
 class DispenseResult(TypedDict):
@@ -68,10 +89,37 @@ class SyringePump(Instrument):
         description="Line occlusion stalled the motor. Cleared by clear_occlusion.",
         kind="soft",
     )
+    syringe = resource(
+        "labwire:syringe",
+        kind="consumable",
+        title="Installed syringe",
+        description=(
+            "The syringe currently installed in the pump: its model, capacity, and "
+            "how much it holds by the pump's own accounting. Changes when the "
+            "plunger moves."
+        ),
+        content_model=SyringeInfo,
+        item_kinds=[],
+    )
 
     def __init__(self, host: str, port: int) -> None:
         super().__init__()
         self._link = LineProtocolClient(host, port)
+        self._dispensed_total = 0.0
+
+    @syringe.reader
+    def _read_syringe(self) -> ResourceSnapshot:
+        # The simulated pump models a 5 mL syringe; the capacity and barrel
+        # figures describe that simulated hardware, not any vendor's.
+        return ResourceSnapshot(
+            index=[],
+            content=SyringeInfo(
+                model="SimSyringe-5000",
+                capacity_ul=5000.0,
+                barrel_diameter_mm=12.45,
+                installed_ul=max(0.0, 5000.0 - self._dispensed_total),
+            ),
+        )
 
     async def on_start(self, server: InstrumentServer) -> None:
         """Open the pump connection and verify it answers.
@@ -126,6 +174,8 @@ class SyringePump(Instrument):
                 raise InterlockError("occlusion detected: motor stalled")
             if state == "IDLE":
                 await ctx.progress(1.0, "dispense complete")
+                self._dispensed_total += dispensed
+                self.syringe.touch()
                 return {"dispensed_ul": dispensed}
             if ctx.cancel_requested:
                 await self._cmd("STP")

@@ -1,4 +1,4 @@
-"""ed25519 run-manifest signing and verification (SPEC §12).
+"""ed25519 run-manifest signing and verification (SPEC §13).
 
 The signature covers the RFC 8785 canonicalization of the manifest minus
 its ``signature`` field, and is encoded as unpadded base64url.
@@ -78,12 +78,12 @@ class SigningKey:
 
     @property
     def public_key_b64(self) -> str:
-        """The 32-byte public key, standard base64 (SPEC §12.1)."""
+        """The 32-byte public key, standard base64 (SPEC §13.1)."""
         return base64.b64encode(bytes(self._raw.verify_key)).decode()
 
     @property
     def key_id(self) -> str:
-        """``sha256:`` + hex SHA-256 of the raw public key (SPEC §12.1)."""
+        """``sha256:`` + hex SHA-256 of the raw public key (SPEC §13.1)."""
         return "sha256:" + hashlib.sha256(bytes(self._raw.verify_key)).hexdigest()
 
     def sign(self, message: bytes) -> bytes:
@@ -96,15 +96,41 @@ class _M(BaseModel):
 
 
 class ManifestCommand(_M):
-    """The submitted command, verbatim, and its enforced class (SPEC §12.1)."""
+    """The run's command: normalized params, class, and digest (SPEC §13.1).
+
+    ``params`` are the normalized parameters from v0.3 on; in 0.2 bundles
+    they are the raw submission. ``params_digest`` is absent in 0.2 bundles.
+    """
 
     name: str
     params: dict[str, Any]
     safety_class: str | None = None
+    params_digest: str | None = None
+
+
+class ManifestAuthorization(_M):
+    """How the run was authorized (SPEC §13.1); absent for S0/S1 and in 0.2."""
+
+    mode: str
+    identity_verified: bool
+    grant_digest: str | None = None
+    request_id: str | None = None
+    expires_at: str | None = None
+    use_index: int | None = None
+    issued_by: str | None = None
+    note: str | None = None
+
+
+class ManifestResourceRevision(_M):
+    """One resource's revision window across the run (SPEC §13.1)."""
+
+    uri: str
+    revision_at_start: str
+    revision_at_end: str
 
 
 class ManifestData(_M):
-    """Digest of the run's record stream (SPEC §12.1)."""
+    """Digest of the run's record stream (SPEC §13.1)."""
 
     digest_alg: str
     digest: str
@@ -112,7 +138,7 @@ class ManifestData(_M):
 
 
 class ManifestTimestamps(_M):
-    """RFC 3339 UTC run timestamps (SPEC §12.1)."""
+    """RFC 3339 UTC run timestamps (SPEC §13.1)."""
 
     submitted: str
     started: str
@@ -120,7 +146,7 @@ class ManifestTimestamps(_M):
 
 
 class SignerInfo(_M):
-    """Key identification for the manifest signature (SPEC §12.1)."""
+    """Key identification for the manifest signature (SPEC §13.1)."""
 
     alg: str
     public_key: str
@@ -128,7 +154,7 @@ class SignerInfo(_M):
 
 
 class Manifest(_M):
-    """The SPEC §12.1 run manifest document (optionally signed).
+    """The SPEC §13.1 run manifest document (optionally signed).
 
     Example:
         >>> # Manifest.model_validate(json.loads(bundle_manifest_json))
@@ -140,6 +166,8 @@ class Manifest(_M):
     instrument: IdentityInfo
     command: ManifestCommand
     status: CommandState
+    authorization: ManifestAuthorization | None = None
+    resource_revisions: list[ManifestResourceRevision] | None = None
     result: Any = None
     error: JsonRpcError | None = None
     data: ManifestData
@@ -174,7 +202,7 @@ def sign_manifest(manifest: dict[str, Any], key: SigningKey) -> dict[str, Any]:
 
 
 def verify_manifest(doc: dict[str, Any]) -> VerificationResult:
-    """Verify a signed manifest's key_id and signature (SPEC §12.2).
+    """Verify a signed manifest's key_id and signature (SPEC §13.2).
 
     Example:
         >>> # outcome = verify_manifest(json.loads(manifest_json))
@@ -229,7 +257,7 @@ def verify_bundle(path: Path) -> VerificationResult:
     try:
         parsed = Manifest.model_validate(doc)
     except Exception as exc:
-        errors.append(f"manifest does not match SPEC §12.1: {exc}")
+        errors.append(f"manifest does not match SPEC §13.1: {exc}")
         return VerificationResult(ok=False, errors=errors)
     records_path = manifest_path.parent / "records.jsonl"
     if records_path.exists():

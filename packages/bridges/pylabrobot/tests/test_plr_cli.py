@@ -41,14 +41,15 @@ def test_check_reports_the_deck_and_every_safety_class() -> None:
     assert result.exit_code == 0, result.output
     assert "S2  aspirate" in result.output
     assert "S0  stop" in result.output
-    assert "source_plate: plate 8x12" in result.output
-    assert "tips: tip_rack 8x12  (96 tips)" in result.output
+    assert "labwire:deck/source_plate: plate 8x12" in result.output
+    assert "labwire:deck/tips: tip_rack 8x12  (96 tips)" in result.output
 
 
 def test_check_surfaces_hazards_and_locks(tmp_path: Path) -> None:
     path = tmp_path / "labwire-pylabrobot.yaml"
     path.write_text(
-        "version: 1\nresources:\n  source_plate:\n    hazard: corrosive\n    locked: true\n"
+        "version: 1\nresources:\n  labwire:deck/source_plate:\n"
+        "    hazard: corrosive\n    locked: true\n"
     )
     result = runner.invoke(cli.app, ["check", TARGET, "-a", str(path)])
     assert result.exit_code == 0, result.output
@@ -66,7 +67,7 @@ def test_check_reports_an_excluded_command_as_excluded(tmp_path: Path) -> None:
 
 def test_a_bad_annotation_file_exits_nonzero(tmp_path: Path) -> None:
     path = tmp_path / "labwire-pylabrobot.yaml"
-    path.write_text("version: 1\nresources:\n  plate: {hazzard: corrosive}\n")
+    path.write_text("version: 1\nresources:\n  labwire:deck/plate: {hazzard: corrosive}\n")
     result = runner.invoke(cli.app, ["check", TARGET, "-a", str(path)])
     assert result.exit_code == 1
 

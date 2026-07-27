@@ -14,6 +14,7 @@ import pytest
 from pylabrobot.liquid_handling import LiquidHandler
 from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
 from pylabrobot.resources import (
+    PLT_CAR_L5AC_A00,
     Cor_96_wellplate_360ul_Fb,
     set_tip_tracking,
     set_volume_tracking,
@@ -49,6 +50,7 @@ async def rig() -> AsyncIterator[LiquidHandler]:
     deck.assign_child_resource(hamilton_96_tiprack_1000uL_filter(name="tips"), rails=1)
     deck.assign_child_resource(Cor_96_wellplate_360ul_Fb(name="source_plate"), rails=7)
     deck.assign_child_resource(Cor_96_wellplate_360ul_Fb(name="target_plate"), rails=13)
+    deck.assign_child_resource(PLT_CAR_L5AC_A00(name="staging"), rails=19)
     yield handler
     with contextlib.suppress(RuntimeError):
         await handler.stop()  # a test may have stopped it through the protocol

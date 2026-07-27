@@ -1,4 +1,4 @@
-"""End-to-end: signed bundles written per terminal run (SPEC §12)."""
+"""End-to-end: signed bundles written per terminal run (SPEC §13)."""
 
 import asyncio
 import hashlib

@@ -45,7 +45,7 @@ uv manages Python itself; no system Python needed.
   applicable.
 - `make check` must be green; CI runs it on Python 3.12 and 3.13.
 - Protocol-affecting changes must update spec, models, and the conformance
-  table (§14) together.
+  table (§15) together.
 
 ## License
 

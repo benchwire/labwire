@@ -51,8 +51,8 @@ jobs:
         # addressing and introspection are duck-typed and import no PyLabRobot.
         run: |
           uv run --no-sync python -c "
-          from labwire.bridges.pylabrobot import Address, command_surface
-          assert Address.parse('plate/A1').item == 'A1'
-          assert len(command_surface()) == 10
+          from labwire.bridges.pylabrobot import command_surface, split_deck_uri
+          assert split_deck_uri('labwire:deck/plate/A1') == ('plate', 'A1')
+          assert len(command_surface()) == 12
           print('pure layers import without pylabrobot')
           "

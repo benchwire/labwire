@@ -11,12 +11,52 @@ Example:
     'SimPump-100'
 """
 
+import re
 from typing import Any, Literal, NamedTuple, Self, cast
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
 SafetyClass = Literal["S0", "S1", "S2", "S3"]
 """Command risk classes (SPEC §8.6), a taxonomy adopted from LAP."""
+
+KIND_REGISTRY: frozenset[str] = frozenset(
+    {
+        "deck",
+        "labware",
+        "plate",
+        "tip_rack",
+        "trough",
+        "trash",
+        "lid",
+        "container",
+        "tip_site",
+        "site",
+        "consumable",
+    }
+)
+"""SPEC Appendix A. Kind names without a dot must come from here; anything
+else must be vendor-prefixed (``<vendor>.<name>``). Seeded from the one
+domain that forced the feature, and honest about it."""
+
+_RESOURCE_URI = re.compile(r"^labwire:[A-Za-z0-9](?:[A-Za-z0-9_.\-]|%[0-9A-Fa-f]{2})*$")
+"""A declared resource URI: ``labwire:`` plus one path segment (SPEC §10.1).
+
+Items add segments; only single-segment URIs are declarable."""
+
+_VENDOR_KIND = re.compile(r"^[A-Za-z][A-Za-z0-9_\-]*\.[A-Za-z][A-Za-z0-9_\-]*$")
+
+
+def valid_kind(name: str) -> bool:
+    """Whether a kind name is registered or well-formed vendor-prefixed.
+
+    Example:
+        >>> valid_kind("container"), valid_kind("acme.hotel_slot"), valid_kind("wells")
+        (True, True, False)
+    """
+    if "." in name:
+        return bool(_VENDOR_KIND.match(name))
+    return name in KIND_REGISTRY
+
 
 CONFIRMATION_REQUIRED_CLASSES: frozenset[str] = frozenset({"S2", "S3"})
 """Classes whose submissions require a confirmation value (SPEC §8.6)."""
@@ -60,7 +100,11 @@ class SchemaScan(NamedTuple):
     ``numeric`` holds a path per place a number may occur. ``opaque`` holds a
     path per place the schema declines to say, which is treated as a failure
     rather than as an absence: a schema that permits anything permits a
-    quantity.
+    quantity. ``units`` holds, for each numeric path, the value of the
+    ``unit`` keyword on that node (SPEC §7.6), or None where absent.
+    ``keyword_nodes`` holds ``(path, node)`` for every node carrying one of
+    the keywords this protocol claims (``unit``, ``resource_ref``), so
+    validators can enforce where each is and is not permitted.
 
     Example:
         >>> scan_schema({"properties": {"v": {"type": "number"}}}).numeric
@@ -69,6 +113,9 @@ class SchemaScan(NamedTuple):
 
     numeric: frozenset[str]
     opaque: frozenset[str]
+    units: dict[str, str | None] = {}  # noqa: RUF012 - NamedTuple default, never mutated
+    keyword_nodes: tuple[tuple[str, str, dict[str, Any]], ...] = ()
+    """``(keyword, path, resolved node)`` per claimed-keyword occurrence."""
 
 
 def _dict(value: Any) -> dict[str, Any] | None:
@@ -154,6 +201,9 @@ def _declares_number(schema: dict[str, Any]) -> bool:
     )
 
 
+_CLAIMED_KEYWORDS = ("unit", "resource_ref")
+
+
 def _walk(
     node: Any,
     root: dict[str, Any],
@@ -162,6 +212,9 @@ def _walk(
     seen: frozenset[str],
     numeric: set[str],
     opaque: set[str],
+    units: dict[str, str | None],
+    claimed: list[tuple[str, str, dict[str, Any]]],
+    inherited_unit: str | None = None,
 ) -> None:
     """Record every path at which a number may appear, or which cannot be read."""
     if node is False:
@@ -181,50 +234,92 @@ def _walk(
 
     if _declares_number(resolved):
         numeric.add(path)
+        declared_unit = resolved.get("unit", inherited_unit)
+        if path not in units or units[path] is None:
+            units[path] = declared_unit if isinstance(declared_unit, str) else None
+    for keyword in _CLAIMED_KEYWORDS:
+        if keyword in resolved:
+            claimed.append((keyword, path, resolved))
 
     structural = _CONSTRAINING_KEYS & resolved.keys()
     if not structural and not _declares_number(resolved):
         opaque.add(path)  # an unconstrained node permits a number
         return
 
+    own_unit = resolved.get("unit")
+    branch_unit = own_unit if isinstance(own_unit, str) else inherited_unit
     for key in _BRANCH_KEYS:
         member = resolved.get(key)
         if isinstance(member, list):
             for raw in cast("list[Any]", member):
-                _walk(raw, root, path, depth + 1, seen, numeric, opaque)
+                _walk(
+                    raw,
+                    root,
+                    path,
+                    depth + 1,
+                    seen,
+                    numeric,
+                    opaque,
+                    units,
+                    claimed,
+                    branch_unit,
+                )
         elif member is not None:
-            _walk(member, root, path, depth + 1, seen, numeric, opaque)
+            _walk(
+                member,
+                root,
+                path,
+                depth + 1,
+                seen,
+                numeric,
+                opaque,
+                units,
+                claimed,
+                branch_unit,
+            )
 
     for key in _NAMED_KEYS:
         members = _dict(resolved.get(key))
         if members is not None:
             for name, member in members.items():
                 child = f"{path}.{name}" if path else str(name)
-                _walk(member, root, child, depth + 1, seen, numeric, opaque)
+                _walk(member, root, child, depth + 1, seen, numeric, opaque, units, claimed)
 
     for key in _PATTERN_KEYS:
         members = _dict(resolved.get(key))
         if members is not None:
             for member in members.values():
-                _walk(member, root, f"{path}{{}}", depth + 1, seen, numeric, opaque)
+                _walk(member, root, f"{path}{{}}", depth + 1, seen, numeric, opaque, units, claimed)
 
     prefix_items = resolved.get("prefixItems")
     if isinstance(prefix_items, list):
         for index, member in enumerate(cast("list[Any]", prefix_items)):
-            _walk(member, root, f"{path}[{index}]", depth + 1, seen, numeric, opaque)
+            _walk(
+                member, root, f"{path}[{index}]", depth + 1, seen, numeric, opaque, units, claimed
+            )
 
     for key in _ITEM_KEYS:
         member = resolved.get(key)
         if isinstance(member, list):  # draft-07 tuple form of `items`
             for index, entry in enumerate(cast("list[Any]", member)):
-                _walk(entry, root, f"{path}[{index}]", depth + 1, seen, numeric, opaque)
+                _walk(
+                    entry,
+                    root,
+                    f"{path}[{index}]",
+                    depth + 1,
+                    seen,
+                    numeric,
+                    opaque,
+                    units,
+                    claimed,
+                )
         elif member is not None:
-            _walk(member, root, f"{path}[]", depth + 1, seen, numeric, opaque)
+            _walk(member, root, f"{path}[]", depth + 1, seen, numeric, opaque, units, claimed)
 
     for key in _VALUE_KEYS:
         member = resolved.get(key)
         if member is not None:
-            _walk(member, root, f"{path}{{}}", depth + 1, seen, numeric, opaque)
+            _walk(member, root, f"{path}{{}}", depth + 1, seen, numeric, opaque, units, claimed)
 
     # An object that neither names its properties nor closes the door on extra
     # ones can carry a quantity under a name nobody declared.
@@ -250,8 +345,20 @@ def scan_schema(schema: dict[str, Any], root: dict[str, Any] | None = None) -> S
     """
     numeric: set[str] = set()
     opaque: set[str] = set()
-    _walk(schema, root if root is not None else schema, "", 0, frozenset(), numeric, opaque)
-    return SchemaScan(frozenset(numeric), frozenset(opaque))
+    units: dict[str, str | None] = {}
+    claimed: list[tuple[str, str, dict[str, Any]]] = []
+    _walk(
+        schema,
+        root if root is not None else schema,
+        "",
+        0,
+        frozenset(),
+        numeric,
+        opaque,
+        units,
+        claimed,
+    )
+    return SchemaScan(frozenset(numeric), frozenset(opaque), units, tuple(claimed))
 
 
 def carries_number(schema: dict[str, Any], root: dict[str, Any] | None = None) -> bool:
@@ -317,7 +424,7 @@ class _SpecModel(BaseModel):
 
 
 class IdentityInfo(_SpecModel):
-    """Instrument identity (SPEC §7.1); embedded verbatim in manifests (§12).
+    """Instrument identity (SPEC §7.1); embedded verbatim in manifests (§13).
 
     Example:
         >>> IdentityInfo(
@@ -436,6 +543,72 @@ class CommandSpec(_SpecModel):
                 f"command {self.name!r}: the {label} carries numbers that name no field, so "
                 "at least one UCUM unit code must be declared"
             )
+        self._check_claimed_keywords(scan, label)
+
+    def _check_claimed_keywords(self, scan: SchemaScan, label: str) -> None:
+        """Enforce SPEC §7.2/§7.6: where `resource_ref` and `unit` may appear."""
+        for keyword, path, node in scan.keyword_nodes:
+            where = path or "<the whole value>"
+            if keyword == "unit":
+                raise ValueError(
+                    f"command {self.name!r}: the 'unit' schema keyword at {where} is "
+                    f"scoped to resource content schemas (SPEC 7.6); {label} units are "
+                    "declared in unit_annotations and returns_units"
+                )
+            if label != "parameter":
+                raise ValueError(
+                    f"command {self.name!r}: 'resource_ref' at {where} is permitted only "
+                    "inside params_schema in v0.3 (SPEC 7.2)"
+                )
+            ref = _dict(node.get("resource_ref"))
+            kind = ref.get("kind") if ref else None
+            enumerated_by = ref.get("enumerated_by") if ref else None
+            if (
+                ref is None
+                or not isinstance(kind, str)
+                or not isinstance(enumerated_by, str)
+                or not kind.strip()
+                or not enumerated_by.strip()
+            ):
+                raise ValueError(
+                    f"command {self.name!r}: resource_ref at {where} must be an object "
+                    "with non-empty string members 'kind' and 'enumerated_by' (SPEC 7.2)"
+                )
+            if not valid_kind(kind):
+                raise ValueError(
+                    f"command {self.name!r}: resource_ref at {where} declares kind "
+                    f"{kind!r}, which is neither in the kind registry (SPEC Appendix A) "
+                    "nor vendor-prefixed as '<vendor>.<name>'"
+                )
+            if node.get("type") != "string":
+                raise ValueError(
+                    f"command {self.name!r}: resource_ref at {where} must sit on a "
+                    "string-typed node; a reference is a URI"
+                )
+            if "pattern" in node:
+                raise ValueError(
+                    f"command {self.name!r}: resource_ref at {where} must not share its "
+                    "node with a 'pattern': a pattern is satisfiable by invention, which "
+                    "is the failure typed references exist to remove (SPEC 7.2)"
+                )
+
+    def references(self) -> list[tuple[str, dict[str, str]]]:
+        """Every ``(path, resource_ref)`` declared in this command's parameters.
+
+        Example:
+            >>> CommandSpec(
+            ...     name="go", title="Go", description="Go.",
+            ...     params_schema={"type": "object", "additionalProperties": False},
+            ...     interruptible=False,
+            ... ).references()
+            []
+        """
+        scan = scan_schema(self.params_schema)
+        return [
+            (path, cast("dict[str, str]", node["resource_ref"]))
+            for keyword, path, node in scan.keyword_nodes
+            if keyword == "resource_ref"
+        ]
 
 
 class ChannelSpec(_SpecModel):
@@ -460,6 +633,83 @@ class ChannelSpec(_SpecModel):
             raise ValueError(
                 f"channel {self.name!r}: unit must be a non-empty UCUM code "
                 '(use "1" for dimensionless channels)'
+            )
+        return self
+
+
+class ResourceSpec(_SpecModel):
+    """A declared resource (SPEC §7.6): addressable, typed, readable state.
+
+    Field-shape validation only in this milestone; the content-schema unit
+    rule and reference-closure checks land with the server implementation.
+
+    Example:
+        >>> ResourceSpec(
+        ...     uri="labwire:syringe", kind="consumable", title="Syringe",
+        ...     description="The installed syringe.", item_kinds=[],
+        ...     revision="r-1", content_schema={"type": "object",
+        ...     "additionalProperties": False},
+        ... ).kind
+        'consumable'
+    """
+
+    uri: str
+    kind: str
+    title: str
+    description: str
+    item_kinds: list[str]
+    revision: str
+    content_schema: dict[str, Any]
+
+    @model_validator(mode="after")
+    def _well_formed(self) -> Self:
+        """Enforce SPEC §7.6: URI shape, kind names, and content units."""
+        if not _RESOURCE_URI.match(self.uri):
+            raise ValueError(
+                f"resource uri {self.uri!r} is not a declarable labwire: URI: expected "
+                "'labwire:' plus one path segment, like 'labwire:deck' (items add "
+                "segments and are not declared)"
+            )
+        for label, name in (
+            ("kind", self.kind),
+            *(("item_kinds entry", k) for k in self.item_kinds),
+        ):
+            if not valid_kind(name):
+                raise ValueError(
+                    f"resource {self.uri!r}: {label} {name!r} is neither in the kind "
+                    "registry (SPEC Appendix A) nor vendor-prefixed as '<vendor>.<name>'"
+                )
+        if not self.revision.strip():
+            raise ValueError(f"resource {self.uri!r}: revision must be non-empty")
+        scan = scan_schema(self.content_schema)
+        if scan.opaque:
+            where = sorted(path or "<the whole value>" for path in scan.opaque)
+            raise ValueError(
+                f"resource {self.uri!r}: content_schema does not say what is at {where}; "
+                "the closed-schema rule of SPEC 7.2 applies to content too"
+            )
+        unitless = sorted(
+            path or "<the whole value>"
+            for path in scan.numeric
+            if not (scan.units.get(path) or "").strip()
+        )
+        if unitless:
+            raise ValueError(
+                f"resource {self.uri!r}: numeric content at {unitless} carries no 'unit' "
+                'keyword (SPEC 7.6; use "1" for dimensionless). Resource content is '
+                "state, state carries quantities, and a units-optional state format "
+                "would reopen the hole 7.2 closed"
+            )
+        misplaced = [
+            (keyword, path)
+            for keyword, path, _node in scan.keyword_nodes
+            if keyword == "resource_ref"
+        ]
+        if misplaced:
+            raise ValueError(
+                f"resource {self.uri!r}: 'resource_ref' is not permitted inside "
+                f"content_schema (found at {[p or '<root>' for _k, p in misplaced]}); "
+                "references are a parameter concept (SPEC 7.2)"
             )
         return self
 
@@ -498,4 +748,36 @@ class InstrumentDescriptor(_SpecModel):
     commands: list[CommandSpec]
     channels: list[ChannelSpec]
     interlocks: list[InterlockSpec]
+    resources: list[ResourceSpec] = []
+    """REQUIRED of v0.3 servers (SPEC §7.1); tolerated absent on receipt."""
     max_concurrent_commands: int = 1
+
+    @model_validator(mode="after")
+    def _references_closed(self) -> Self:
+        """Enforce SPEC §7.6: the reference graph is closed.
+
+        Every ``resource_ref.enumerated_by`` names a declared resource whose
+        ``item_kinds`` contains the declared kind. Checked here so it holds
+        both for a server about to serve the descriptor and for a client
+        that just received one: an agent pointed at a resource that does not
+        exist has a discovery story that dead-ends.
+        """
+        by_uri = {spec.uri: spec for spec in self.resources}
+        for command_spec in self.commands:
+            for path, ref in command_spec.references():
+                target = by_uri.get(ref["enumerated_by"])
+                if target is None:
+                    raise ValueError(
+                        f"command {command_spec.name!r}: resource_ref at "
+                        f"{path or '<the whole value>'} is enumerated_by "
+                        f"{ref['enumerated_by']!r}, which this descriptor does not "
+                        f"declare (declared: {sorted(by_uri) or '(none)'})"
+                    )
+                if ref["kind"] not in target.item_kinds:
+                    raise ValueError(
+                        f"command {command_spec.name!r}: resource_ref at "
+                        f"{path or '<the whole value>'} expects kind {ref['kind']!r}, "
+                        f"which {target.uri!r} does not index "
+                        f"(item_kinds: {target.item_kinds})"
+                    )
+        return self
