@@ -28,6 +28,7 @@ from labwire.bridges.pylabrobot.annotations import (
     check,
     load_annotations,
 )
+from labwire.bridges.pylabrobot.bridge import PyLabRobotInstrument, map_error
 from labwire.bridges.pylabrobot.deck import (
     ChannelState,
     DeckState,
@@ -64,6 +65,7 @@ __all__ = [
     "InstrumentAnnotation",
     "LabwareKind",
     "LabwareState",
+    "PyLabRobotInstrument",
     "ResourceAnnotation",
     "Unresolved",
     "UnresolvedReason",
@@ -77,6 +79,7 @@ __all__ = [
     "introspect",
     "load_annotations",
     "locked_labware",
+    "map_error",
     "resolve",
     "resolve_all",
 ]

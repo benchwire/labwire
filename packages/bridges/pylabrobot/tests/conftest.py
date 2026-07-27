@@ -7,6 +7,7 @@ websocket Visualizer that opens a browser, which is unusable in CI, so the
 chatterbox backend is the only honest option.
 """
 
+import contextlib
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
@@ -49,7 +50,8 @@ async def rig() -> AsyncIterator[LiquidHandler]:
     deck.assign_child_resource(Cor_96_wellplate_360ul_Fb(name="source_plate"), rails=7)
     deck.assign_child_resource(Cor_96_wellplate_360ul_Fb(name="target_plate"), rails=13)
     yield handler
-    await handler.stop()
+    with contextlib.suppress(RuntimeError):
+        await handler.stop()  # a test may have stopped it through the protocol
 
 
 @pytest.fixture
