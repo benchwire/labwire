@@ -23,9 +23,9 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest --cov --cov-report=term-missing
 
-  core-without-ophyd:
-    # ophyd is an optional dependency of the bridge package: the rest of the
-    # workspace must import and pass without it installed.
+  core-without-bridge-dependencies:
+    # ophyd and pylabrobot are optional dependencies of the bridge packages:
+    # the rest of the workspace must import and pass without either installed.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,14 +34,25 @@ jobs:
           enable-cache: true
           python-version: "3.12"
       - run: uv sync --all-packages
-      - name: Remove the optional ophyd dependency
-        run: uv pip uninstall ophyd
-      - name: Confirm ophyd really is absent
+      - name: Remove the optional bridge dependencies
+        run: uv pip uninstall ophyd pylabrobot
+      - name: Confirm they really are absent
         run: |
-          if uv run --no-sync python -c "import ophyd" 2>/dev/null; then
-            echo "ophyd is still installed; this job proves nothing" >&2
-            exit 1
-          fi
-          echo "ophyd absent, as intended"
+          for module in ophyd pylabrobot; do
+            if uv run --no-sync python -c "import $module" 2>/dev/null; then
+              echo "$module is still installed; this job proves nothing" >&2
+              exit 1
+            fi
+            echo "$module absent, as intended"
+          done
       - name: labwire-core must still pass
         run: uv run --no-sync pytest packages/core/tests -q
+      - name: The bridge's pure layers must still import
+        # addressing and introspection are duck-typed and import no PyLabRobot.
+        run: |
+          uv run --no-sync python -c "
+          from labwire.bridges.pylabrobot import Address, command_surface
+          assert Address.parse('plate/A1').item == 'A1'
+          assert len(command_surface()) == 10
+          print('pure layers import without pylabrobot')
+          "

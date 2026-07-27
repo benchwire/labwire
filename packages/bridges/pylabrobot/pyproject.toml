@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-pylabrobot"
+version = "0.2.0.dev0"
+description = "Expose PyLabRobot liquid handlers as Labwire instruments"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+dependencies = ["labwire-core", "pyyaml>=6", "typer>=0.12"]
+
+[project.optional-dependencies]
+# PyLabRobot is optional: the bridge is only usable with it, but labwire-core
+# must never depend on it, and the rest of the workspace must import without it.
+pylabrobot = ["pylabrobot>=0.2"]
+
+[project.scripts]
+labwire-pylabrobot = "labwire.bridges.pylabrobot.cli:main"
+
+[dependency-groups]
+dev = ["pylabrobot>=0.2"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]

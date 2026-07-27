@@ -18,7 +18,8 @@
     "packages/drivers/src",
     "packages/cli/src",
     "packages/mcp/src",
-    "packages/bridges/ophyd/src"
+    "packages/bridges/ophyd/src",
+    "packages/bridges/pylabrobot/src"
   ],
   "executionEnvironments": [
     {
@@ -29,7 +30,8 @@
         "packages/drivers/src",
         "packages/cli/src",
         "packages/mcp/src",
-        "packages/bridges/ophyd/src"
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -44,7 +46,8 @@
         "packages/drivers/src",
         "packages/cli/src",
         "packages/mcp/src",
-        "packages/bridges/ophyd/src"
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -65,6 +68,7 @@
         "packages/cli/src",
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src",
         "examples/ophyd_scan"
       ],
       "reportMissingTypeStubs": "none",
@@ -72,6 +76,43 @@
       "reportUnknownVariableType": "none",
       "reportUnknownArgumentType": "none",
       "reportArgumentType": "none"
+    },
+    {
+      "root": "packages/bridges/pylabrobot/src",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none"
+    },
+    {
+      "root": "packages/bridges/pylabrobot/tests",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none",
+      "reportUnknownParameterType": "none",
+      "reportArgumentType": "none",
+      "reportIncompatibleMethodOverride": "none",
+      "reportReturnType": "none",
+      "reportUntypedBaseClass": "none"
     }
   ]
 }

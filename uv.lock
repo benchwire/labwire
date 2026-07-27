@@ -15,6 +15,7 @@ members = [
     "labwire-drivers",
     "labwire-mcp",
     "labwire-ophyd",
+    "labwire-pylabrobot",
     "labwire-sim",
     "labwire-workspace",
 ]
@@ -637,6 +638,38 @@ dev = [
 ]
 
 [[package]]
+name = "labwire-pylabrobot"
+version = "0.2.0.dev0"
+source = { editable = "packages/bridges/pylabrobot" }
+dependencies = [
+    { name = "labwire-core" },
+    { name = "pyyaml" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+pylabrobot = [
+    { name = "pylabrobot" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pylabrobot" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "labwire-core", editable = "packages/core" },
+    { name = "pylabrobot", marker = "extra == 'pylabrobot'", specifier = ">=0.2" },
+    { name = "pyyaml", specifier = ">=6" },
+    { name = "typer", specifier = ">=0.12" },
+]
+provides-extras = ["pylabrobot"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pylabrobot", specifier = ">=0.2" }]
+
+[[package]]
 name = "labwire-sim"
 version = "0.2.0.dev0"
 source = { editable = "packages/sim" }
@@ -995,6 +1028,19 @@ wheels = [
 [package.optional-dependencies]
 crypto = [
     { name = "cryptography" },
+]
+
+[[package]]
+name = "pylabrobot"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/be/fe/a9b60b1267812e74ab9a3ca796a35591db2c529e940ed87b370d5de8ea59/pylabrobot-0.2.1.tar.gz", hash = "sha256:4caff5054c003cc887e4befb6d73d93ba015fb1cf3187f2dc95506c9141bd564", size = 1000583, upload-time = "2026-03-23T04:40:35.082Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fb/c0/4a1d8d6d6ec6d4fc1c1f25257c3a71be07b438698fb24eedf7c14bc14313/pylabrobot-0.2.1-py3-none-any.whl", hash = "sha256:8b7b58d1c31a7b19b9d6a11f10ba1303c6222b6a582a8a95f18c6abcf41408cd", size = 1174640, upload-time = "2026-03-23T04:40:33.168Z" },
 ]
 
 [[package]]

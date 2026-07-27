@@ -64,7 +64,7 @@ PyLabRobot exceptions               Labwire typed errors (table below)
 ```
 
 The instrument surface is deliberately small. PyLabRobot's `LiquidHandler`
-has around thirty public coroutines; the bridge exposes nine. The rest are
+has around thirty public coroutines; the bridge exposes ten. The rest are
 either 96-head variants of what is already there, gripper moves (see below),
 or internals an agent has no business calling.
 
