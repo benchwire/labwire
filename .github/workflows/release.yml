@@ -11,6 +11,11 @@
 # Publish jobs run only when the repository variable PYPI_PUBLISHERS_READY
 # is "true", so cutting a GitHub release before the PyPI side is registered
 # builds the artifacts and skips the upload instead of failing.
+#
+# PyPI allows at most 3 pending publishers per account at once, so the
+# first-ever publish happens in waves: register 3, dispatch with `only`
+# naming them, let the publishers convert, register the next 3. The `only`
+# input exists for exactly that; leave it "all" afterwards.
 
 name: Release
 
@@ -18,6 +23,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      only:
+        description: "Comma-separated project names to publish, or 'all'"
+        required: false
+        default: "all"
 
 jobs:
   build:
@@ -40,7 +50,13 @@ jobs:
 
   publish:
     needs: build
-    if: vars.PYPI_PUBLISHERS_READY == 'true'
+    # Wave filter: on dispatch, publish only the named projects (exact
+    # token match, comma-delimited); release events publish everything.
+    if: >-
+      vars.PYPI_PUBLISHERS_READY == 'true' &&
+      (github.event_name != 'workflow_dispatch' ||
+       inputs.only == 'all' || inputs.only == '' ||
+       contains(format(',{0},', inputs.only), format(',{0},', matrix.project)))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
