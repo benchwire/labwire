@@ -124,7 +124,9 @@ def test_numeric_param_without_unit_is_a_declaration_error() -> None:
 
 
 def test_numeric_result_without_unit_is_a_declaration_error() -> None:
-    with pytest.raises(TypeError, match="numeric result field"):
+    # A mapping return names no field, so the message says so rather than
+    # naming one; either way the declaration is refused.
+    with pytest.raises(TypeError, match=r"name no field|result field"):
         _declare_unitless_result()
 
 
@@ -162,7 +164,11 @@ def test_descriptor_from_the_wire_is_rejected_when_units_are_missing() -> None:
                 "name": "dose",
                 "title": "Dose",
                 "description": "Dose without units.",
-                "params_schema": {"type": "object", "properties": {"ml": {"type": "number"}}},
+                "params_schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"ml": {"type": "number"}},
+                },
                 "unit_annotations": {},
                 "interruptible": True,
             }
@@ -176,7 +182,11 @@ def test_empty_unit_string_is_not_a_unit() -> None:
                 "name": "dose",
                 "title": "Dose",
                 "description": "Dose with a blank unit.",
-                "params_schema": {"type": "object", "properties": {"ml": {"type": "number"}}},
+                "params_schema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"ml": {"type": "number"}},
+                },
                 "unit_annotations": {"ml": "  "},
                 "interruptible": True,
             }

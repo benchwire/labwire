@@ -87,6 +87,7 @@ from pydantic import (
 from pydantic import (
     ValidationError as PydanticValidationError,
 )
+from pydantic_core import to_jsonable_python
 
 logger = logging.getLogger("labwire.server")
 
@@ -334,6 +335,23 @@ class CommandContext:
     async def sleep(self, seconds: float) -> None:
         """Sleep in instrument time (respects the injected clock)."""
         await self._clock.sleep(seconds)
+
+
+def _jsonable(value: Any) -> Any:
+    """Normalize a handler's return value to plain JSON types.
+
+    A command may return a pydantic model, which is the right way to declare
+    a result the protocol can type-check. The wire, the run record, and the
+    signed manifest must all carry the same plain JSON, so the conversion
+    happens once here rather than being repeated (and diverging) downstream.
+
+    Example:
+        >>> _jsonable({"volume_ul": 1.5})
+        {'volume_ul': 1.5}
+    """
+    if value is None or isinstance(value, str | bool | int | float):
+        return value
+    return to_jsonable_python(value, exclude_none=True)
 
 
 class CommandMeta(BaseModel):
@@ -985,7 +1003,7 @@ class InstrumentServer:
             if run.is_canceling():
                 self._finish(run, "canceled")
             else:
-                run.result = result
+                run.result = _jsonable(result)
                 self._finish(run, "succeeded")
 
     def _cancel_terminal(self, run: _Run) -> None:

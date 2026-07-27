@@ -12,7 +12,7 @@ on the deck this morning. Its interesting state is a tree. Building the
 whether the capability model generalizes, and this file is the result:
 everything that strained, written down while it was straining.
 
-Eight findings. Two are serious enough that a v0.3 which ignored them would be
+Nine findings. Two are serious enough that a v0.3 which ignored them would be
 a protocol for detectors wearing the clothes of a general standard. Three are
 small and cheap, and one of those (F5, a hole in the mandatory-unit guarantee)
 was serious enough to fix immediately and shipped in 0.2.1. The last section
@@ -33,6 +33,7 @@ list; the work itself is scheduled in [ROADMAP.md](ROADMAP.md).
 | F6 | Operations with no physical consequence have no class | small |
 | F7 | Preconditions are discoverable only by failing | small, cheap |
 | F8 | A command has no point of no return | worth naming |
+| F9 | The unit guarantee covers declarations, not payloads | significant |
 
 ---
 
@@ -240,10 +241,13 @@ silently covers the most dangerous class is the wrong default.
 
 **Severity: small, and the cheapest fix here. RESOLVED in 0.2.1.**
 
-> **Resolved 2026-07-27.** The rule in SPEC §7.2 now covers a parameter that
-> carries a number anywhere in a conforming instance, and the implementation
-> matches it at both layers. What changed is at the end of this section; the
-> finding is kept because findings are history, not a task list.
+> **Resolved 2026-07-27, in two passes.** The first pass covered arrays and
+> was wrong to be confident: an adversarial audit of it, run before the claim
+> went out, found the guarantee still false in three structural ways and
+> demonstrated a live leak in this repository's own PyLabRobot bridge. The
+> second pass rewrote the checker. What changed, and what the audit found, is
+> at the end of this section. The finding is kept because findings are
+> history, not a task list.
 
 Confirmed by running it, not by reading the code:
 
@@ -269,27 +273,70 @@ nothing made it.
 
 ### What was done, in 0.2.1
 
-The rule is now about the quantity rather than about the container it arrived
-in. A parameter or result needs a UCUM code if a `number` or `integer` can
-appear anywhere in a conforming instance: through `items`, nested arrays,
-`prefixItems` tuples, `additionalProperties` mappings, `anyOf`/`oneOf`/
-`allOf`, and local `$ref`s into `$defs`. Because a descriptor arriving over
-the wire need not have been written by pydantic, the `type`-as-list, `const`,
-and `enum` spellings of a number count too.
+**The first attempt, and why it was not enough.** The obvious fix was to look
+through `items` when collecting numeric parameters. That is what shipped
+first, and an adversarial audit run against it immediately afterwards returned
+a verdict of *not yet true*. Three structural problems, each reproduced
+against a running server:
 
-Nested objects went the other way. `unit_annotations` is keyed by parameter
-name, so one code cannot describe an object whose fields are quantities of
-different kinds, and annotating the container would have been a lie. Such a
-declaration is now **refused**, with an error naming the offending fields and
-telling the author to flatten them. Per-path unit annotation is the real fix
-and is a candidate for a later version; refusing is the honest interim.
+1. The check was a **keyword allowlist that failed open**. Any JSON Schema
+   spelling it did not enumerate reported "no number here": a typeless node,
+   `patternProperties`, `unevaluatedItems`, the draft-07 array form of
+   `items`, `additionalProperties: true`, a multi-hop `$ref`.
+2. The entry points read `schema["properties"]` **without resolving**, so a
+   root-level `$ref`, `allOf`, or `if`/`then`/`else` hid the entire property
+   set. pydantic emits a bare `$ref` root for any self-referential model.
+3. The nested-object check looked exactly **one level deep and never through a
+   container**, so `list[Model]` escaped while a bare `Model` was refused.
 
-The repository audit that followed found exactly one violation: `channels`, a
-`list[int]` of pipetting channel indices in the PyLabRobot bridge, now
-annotated `"1"`. Telemetry needed no change, and the reason is worth recording:
-`ChannelSpec` has always required a non-empty unit for every channel regardless
-of dtype, and v0.2 channel dtypes are scalar only, so the hole could not exist
-there.
+The third was live in this repository. `describe_deck` in the PyLabRobot
+bridge returned `dict[str, Any]`, which pydantic writes as
+`{"type": "object", "additionalProperties": true}`, so the checker had nothing
+to look at and the command shipped `location_mm` in millimetres and
+`item_max_volume_ul` in microlitres with `returns_units: {}`. It then cleared
+every downstream layer: accepted on the wire, copied verbatim into the signed
+manifest, and rendered to an agent by the MCP adapter with no units line. The
+repository's own flagship bridge was falsifying the headline claim in the
+first thing a stranger runs.
+
+**The second attempt.** The checker was rewritten as a schema walker that
+enumerates every path at which a number can appear and **fails closed**:
+
+- It walks `properties`, `patternProperties`, `items` in both the 2020-12 and
+  draft-07 spellings, `prefixItems`, `additionalItems`, `contains`,
+  `additionalProperties`, `unevaluatedItems`, `unevaluatedProperties`, and the
+  `anyOf`/`oneOf`/`allOf`/`then`/`else` branches, to any depth.
+- It resolves `$ref` as a general local RFC 6901 pointer, follows chains,
+  handles draft-07 `#/definitions/` as well as `#/$defs/`, merges siblings so
+  a stale reference cannot erase a `type: number` next to it, and guards
+  cycles with a seen set.
+- **A schema that declines to say what it contains is now an error**, not an
+  absence. An open mapping, an untyped value, an array with no declared
+  `items`, and a reference this build cannot follow are all refused, because a
+  schema that permits anything permits a quantity. SPEC §7.2 now requires
+  schemas to be closed, and the spec's own flagship example, which was open,
+  was fixed.
+
+Results are annotated **by path**, because a result is legitimately a tree:
+`returns_units` accepts `labware[].grid.item_max_volume_ul` and a key covers
+every path beneath it. Parameters stay flat, and a parameter that is an object
+with numeric fields is still refused with instructions to flatten it, since
+one code cannot describe fields of different kinds.
+
+**What it cost.** Every PyLabRobot bridge command now returns a declared model
+rather than `dict[str, Any]`, which is better for agents anyway, and the
+server normalizes a model result to plain JSON once so the wire, the run
+record, and the signed manifest carry identical bytes.
+
+Telemetry needed no change, and the reason is recorded as a test rather than a
+claim: `ChannelSpec` has always required a non-empty unit for every channel
+regardless of dtype, and v0.2 channel dtypes are scalar only.
+
+**What is still not covered, honestly.** The guarantee is about *declared
+schemas*. It does not reach event payloads, progress messages, or the values a
+handler actually returns at runtime, none of which are schema-checked against
+their declaration. Those are separate gaps, recorded as F9 below rather than
+folded into this one.
 
 ---
 
@@ -368,6 +415,52 @@ a command report a phase transition after which cancellation is refused with
 `NotCancelable`, so an agent can distinguish "stopped before anything
 happened" from "stopped, and the reagent is gone". The progress mechanism
 already carries per-run updates and could carry this.
+
+---
+
+## F9. The unit guarantee covers declarations, not payloads
+
+**Severity: significant.** Found by the audit that verified the F5 fix, and
+recorded rather than fixed, because closing it is a design change and not a
+patch.
+
+Everything F5 is about happens at declaration and at descriptor validation. A
+command's `params_schema` and `returns_schema` are checked, thoroughly now.
+Three things are not:
+
+- **Event payloads.** `notifications/event` carries a free-form `data` object.
+  An instrument reporting `{"pressure_kpa": 310.0}` in an event is publishing
+  a quantity with no unit anywhere in the protocol, and nothing objects.
+  Progress messages are the same shape.
+- **Signed manifests.** The manifest records the command name, its parameters,
+  and its result. It does not record the unit codes that governed them, so a
+  verifier reading a bundle in five years gets `{"volume_ul": 50.0}` and has to
+  trust the field name. The units were known at signing time and were not
+  written down.
+- **Runtime result values.** A handler declares `returns_schema` and then
+  returns whatever it returns. Nothing validates the actual value against the
+  declaration, so a handler can return a field its schema never mentioned.
+
+The pattern is that units are a property of the *contract* and the protocol
+has no way to attach them to *data in flight*. That is fine for commands,
+where the contract is discoverable ahead of time, and not fine for events,
+which have no contract at all.
+
+### Recommendation
+
+Three separate pieces, in descending order of value:
+
+1. **Copy the unit codes into the manifest.** The cheapest and most valuable:
+   a signed record should be self-describing, and the codes are already in
+   hand when the bundle is written. This alone makes a bundle interpretable
+   without the instrument that produced it.
+2. **Declare event schemas.** Give an `EventSpec` in the descriptor the same
+   treatment `CommandSpec` gets: a payload schema and unit annotations,
+   validated by the same walker. Undeclared events stay legal and stay
+   unit-free, which is honest about what they are.
+3. **Validate results against their declaration** before they leave the
+   server, at least in a strict mode. A handler that returns an undeclared
+   field is a bug, and the protocol currently ships it.
 
 ---
 

@@ -20,13 +20,33 @@ Protocol version stays `"0.2"`: no message shape changed.
   UCUM code if a number can appear anywhere in a conforming instance:
   through arrays, nested arrays, fixed-length tuples, mappings, `anyOf`,
   `oneOf`, `allOf`, and local `$ref`s, and for the `type`-as-list, `const`,
-  and `enum` forms a hand-written descriptor can use. Enforced at declaration
-  time and in wire validation, the same two layers as before. Recorded as
-  finding F5 in [SPEC-FINDINGS.md](SPEC-FINDINGS.md), now resolved.
-- A parameter whose type is an **object with numeric fields** is now rejected
+  and `enum` forms a hand-written descriptor can use. The checker walks
+  `patternProperties`, both spellings of `items`, `prefixItems`,
+  `additionalItems`, `contains`, `unevaluatedItems`, `unevaluatedProperties`,
+  and the `if`/`then`/`else` branches, resolves `$ref` as a general local
+  pointer (including draft-07 `#/definitions/`) and follows chains. Enforced
+  at declaration time and in wire validation, the same two layers as before.
+  Recorded as finding F5 in [SPEC-FINDINGS.md](SPEC-FINDINGS.md), now
+  resolved, with the audit that caught the first, insufficient attempt written
+  up there in full.
+- **Schemas must now be closed.** An open mapping, an untyped value, an array
+  that does not declare its `items`, or a reference the build cannot resolve
+  is refused rather than assumed to contain nothing, because a schema that
+  permits anything permits a quantity. SPEC §7.2 states this normatively and
+  the specification's own flagship example, which was open, was fixed.
+- A parameter whose type is an **object with numeric fields** is rejected
   rather than served unannotated. `unit_annotations` is keyed by parameter
   name, so one code cannot describe fields of different kinds; the error names
-  the fields and says to flatten them.
+  the paths and says to flatten them.
+- **`returns_units` is keyed by path**, so a result that is legitimately a
+  tree can be annotated: `labware[].grid.item_max_volume_ul` names a quantity
+  three levels down, and a key covers every path beneath it.
+- **`labwire-pylabrobot` commands return declared models** rather than
+  `dict[str, Any]`. The old opaque return meant `describe_deck` shipped
+  `location_mm` in millimetres and `item_max_volume_ul` in microlitres with no
+  unit codes, through the wire and into signed manifests. A handler returning
+  a model is normalized to plain JSON once in the server, so the wire, the run
+  record, and the manifest carry identical bytes.
 - Canonicalization (RFC 8785) mishandled numeric types that are not `int` or
   `float`: a float subclass leaked its own `repr` into the signed bytes
   (numpy scalars serialized as `np.float64(0.5)`), and numpy integers raised

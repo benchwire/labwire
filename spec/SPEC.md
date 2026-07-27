@@ -241,9 +241,15 @@ Each entry in `commands`:
 - `description` (string, REQUIRED): what the command does, in enough detail
   for an agent to decide when to use it.
 - `params_schema` (object, REQUIRED): a JSON Schema (draft 2020-12) object
-  describing the command's `params`. Note that the empty schema `{}`
-  constrains nothing; commands that take no parameters SHOULD declare
-  `{"type": "object", "additionalProperties": false}`.
+  describing the command's `params`. The schema MUST be **closed**: every
+  object within it MUST declare `"additionalProperties": false` (or name the
+  schema its extra members follow), and every array MUST declare its `items`.
+  An open schema permits a member nobody declared, and an undeclared member
+  can be a quantity, so an open schema silently reopens the unit hole this
+  section exists to close. The empty schema `{}` constrains nothing and MUST
+  NOT be used; commands that take no parameters declare
+  `{"type": "object", "additionalProperties": false}`. The same requirement
+  applies to `returns_schema`.
 - `unit_annotations` (object, REQUIRED): maps parameter name → **UCUM
   case-sensitive unit code** (e.g. `"mL/min"`, `"Cel"`, `"g"`, `"V"`).
   **Every parameter that carries a number MUST have an entry**, and
@@ -939,6 +945,7 @@ otherwise.
         "description": "Dispense a volume of liquid at a controlled flow rate.",
         "params_schema": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "volume_ul": { "type": "number", "exclusiveMinimum": 0 },
             "rate_ul_min": { "type": "number", "exclusiveMinimum": 0 }
@@ -954,6 +961,7 @@ otherwise.
         "safety_class": "S2",
         "returns_schema": {
           "type": "object",
+          "additionalProperties": false,
           "properties": { "dispensed_ul": { "type": "number" } },
           "required": ["dispensed_ul"]
         },

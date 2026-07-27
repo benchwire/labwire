@@ -30,7 +30,7 @@ from typing import Annotated, Any, cast
 
 from labwire.bridges.pylabrobot.addressing import ADDRESS_PATTERN, resolve, resolve_all
 from labwire.bridges.pylabrobot.annotations import AnnotationFile, check
-from labwire.bridges.pylabrobot.deck import deck_state, locked_labware
+from labwire.bridges.pylabrobot.deck import DeckState, deck_state, locked_labware
 from labwire.bridges.pylabrobot.introspect import command_surface, introspect
 from labwire.core import (
     CanceledError,
@@ -43,7 +43,7 @@ from labwire.core import (
     channel,
     command,
 )
-from pydantic import StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 _POLL_S = 0.02
 
@@ -97,6 +97,82 @@ def map_error(exc: BaseException) -> LabwireError:
     }:
         return ValidationError(str(exc) or name)
     return HardwareFaultError(f"{name}: {exc}" if str(exc) else name)
+
+
+class TipResult(BaseModel):
+    """What a tip operation did.
+
+    Typed rather than a bare mapping because an opaque result cannot carry
+    unit codes, and a protocol that cannot say what it returned is not much
+    of a protocol. See SPEC-FINDINGS.md, finding F5.
+
+    Example:
+        >>> TipResult(tip_spots=["tips/A1"], channels_used=[0]).channels_used
+        [0]
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tip_spots: list[str] = []
+    channels_used: list[int] = []
+    returned: bool = False
+    discarded: bool = False
+
+
+class LiquidResult(BaseModel):
+    """What an aspirate or dispense moved.
+
+    Example:
+        >>> LiquidResult(wells=["plate/A1"], total_volume_ul=50.0).total_volume_ul
+        50.0
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    wells: list[str]
+    total_volume_ul: float
+
+
+class TransferResult(BaseModel):
+    """What a transfer moved, and where.
+
+    Example:
+        >>> TransferResult(source="a/A1", targets=["b/A1"], total_volume_ul=10.0).source
+        'a/A1'
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    targets: list[str]
+    total_volume_ul: float
+
+
+class WellVolumeResult(BaseModel):
+    """The volume a well is now recorded as holding.
+
+    Example:
+        >>> WellVolumeResult(well="plate/A1", volume_ul=200.0).volume_ul
+        200.0
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    well: str
+    volume_ul: float
+
+
+class StopResult(BaseModel):
+    """Confirmation that the handler was stopped.
+
+    Example:
+        >>> StopResult(stopped=True).stopped
+        True
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stopped: bool
 
 
 class PyLabRobotBridge(Instrument):
@@ -203,16 +279,16 @@ class PyLabRobotBridge(Instrument):
 
     # --- operations --------------------------------------------------------
 
-    async def do_describe_deck(self, ctx: CommandContext) -> dict[str, Any]:
+    async def do_describe_deck(self, ctx: CommandContext) -> DeckState:
         """Project the deck. Pure read, no motion."""
-        return deck_state(self._lh, self._annotations).model_dump(mode="json")
+        return deck_state(self._lh, self._annotations)
 
     async def do_pick_up_tips(
         self,
         ctx: CommandContext,
         tip_spots: list[Location],
         channels: list[int] | None = None,
-    ) -> dict[str, Any]:
+    ) -> TipResult:
         """Mount tips from the named spots."""
         spots = resolve_all(self._lh, tip_spots)
         self._refuse_locked(spots)
@@ -220,32 +296,32 @@ class PyLabRobotBridge(Instrument):
             ctx, self._lh.pick_up_tips(spots, use_channels=channels), "pick_up_tips"
         )
         self._publish_state()
-        return {"tip_spots": tip_spots, "channels_used": channels or list(range(len(spots)))}
+        return TipResult(tip_spots=tip_spots, channels_used=channels or list(range(len(spots))))
 
     async def do_drop_tips(
         self,
         ctx: CommandContext,
         tip_spots: list[Location],
         channels: list[int] | None = None,
-    ) -> dict[str, Any]:
+    ) -> TipResult:
         """Drop the mounted tips at the named spots."""
         spots = resolve_all(self._lh, tip_spots)
         self._refuse_locked(spots)
         await self._operate(ctx, self._lh.drop_tips(spots, use_channels=channels), "drop_tips")
         self._publish_state()
-        return {"tip_spots": tip_spots}
+        return TipResult(tip_spots=tip_spots)
 
-    async def do_return_tips(self, ctx: CommandContext) -> dict[str, Any]:
+    async def do_return_tips(self, ctx: CommandContext) -> TipResult:
         """Return the mounted tips to where they came from."""
         await self._operate(ctx, self._lh.return_tips(), "return_tips")
         self._publish_state()
-        return {"returned": True}
+        return TipResult(returned=True)
 
-    async def do_discard_tips(self, ctx: CommandContext) -> dict[str, Any]:
+    async def do_discard_tips(self, ctx: CommandContext) -> TipResult:
         """Discard the mounted tips into the trash."""
         await self._operate(ctx, self._lh.discard_tips(), "discard_tips")
         self._publish_state()
-        return {"discarded": True}
+        return TipResult(discarded=True)
 
     async def do_aspirate(
         self,
@@ -253,7 +329,7 @@ class PyLabRobotBridge(Instrument):
         wells: list[Location],
         volumes_ul: list[float],
         flow_rates_ul_s: list[float] | None = None,
-    ) -> dict[str, Any]:
+    ) -> LiquidResult:
         """Draw liquid out of the named containers."""
         self._check_lengths(wells, volumes_ul, "aspirate")
         containers = resolve_all(self._lh, wells)
@@ -265,7 +341,7 @@ class PyLabRobotBridge(Instrument):
         )
         self._aspirated += sum(volumes_ul)
         self._publish_state()
-        return {"wells": wells, "total_volume_ul": sum(volumes_ul)}
+        return LiquidResult(wells=wells, total_volume_ul=sum(volumes_ul))
 
     async def do_dispense(
         self,
@@ -273,7 +349,7 @@ class PyLabRobotBridge(Instrument):
         wells: list[Location],
         volumes_ul: list[float],
         flow_rates_ul_s: list[float] | None = None,
-    ) -> dict[str, Any]:
+    ) -> LiquidResult:
         """Push liquid into the named containers."""
         self._check_lengths(wells, volumes_ul, "dispense")
         containers = resolve_all(self._lh, wells)
@@ -285,7 +361,7 @@ class PyLabRobotBridge(Instrument):
         )
         self._dispensed += sum(volumes_ul)
         self._publish_state()
-        return {"wells": wells, "total_volume_ul": sum(volumes_ul)}
+        return LiquidResult(wells=wells, total_volume_ul=sum(volumes_ul))
 
     async def do_transfer(
         self,
@@ -293,7 +369,7 @@ class PyLabRobotBridge(Instrument):
         source: Location,
         targets: list[Location],
         volumes_ul: list[float],
-    ) -> dict[str, Any]:
+    ) -> TransferResult:
         """Move liquid from one well into others in a single command."""
         self._check_lengths(targets, volumes_ul, "transfer")
         source_well = resolve(self._lh, source)
@@ -308,11 +384,11 @@ class PyLabRobotBridge(Instrument):
         self._aspirated += total
         self._dispensed += total
         self._publish_state()
-        return {"source": source, "targets": targets, "total_volume_ul": total}
+        return TransferResult(source=source, targets=targets, total_volume_ul=total)
 
     async def do_set_well_volume(
         self, ctx: CommandContext, well: Location, volume_ul: float
-    ) -> dict[str, Any]:
+    ) -> WellVolumeResult:
         """Declare how much liquid a well already holds."""
         container = resolve(self._lh, well)
         self._refuse_locked([container])
@@ -328,15 +404,15 @@ class PyLabRobotBridge(Instrument):
             tracker.set_volume(volume_ul)
         except Exception as exc:
             raise map_error(exc) from exc
-        return {"well": well, "volume_ul": volume_ul}
+        return WellVolumeResult(well=well, volume_ul=volume_ul)
 
-    async def do_stop(self, ctx: CommandContext) -> dict[str, bool]:
+    async def do_stop(self, ctx: CommandContext) -> StopResult:
         """Stop the liquid handler."""
         try:
             await self._lh.stop()
         except Exception as exc:
             raise map_error(exc) from exc
-        return {"stopped": True}
+        return StopResult(stopped=True)
 
 
 _IMPLEMENTATIONS: dict[str, str] = {
@@ -364,6 +440,23 @@ _UNITS: dict[str, dict[str, str]] = {
 }
 
 _RETURNS_UNITS: dict[str, dict[str, str]] = {
+    # Keyed by path, because a deck projection is a tree and a quantity three
+    # levels down still needs a code. "1" marks a genuine count.
+    "describe_deck": {
+        "labware[].location_mm": "mm",
+        "labware[].grid.rows": "1",
+        "labware[].grid.columns": "1",
+        "labware[].grid.item_max_volume_ul": "uL",
+        "labware[].tips_available": "1",
+        "channels[].index": "1",
+        "channels[].tip_max_volume_ul": "uL",
+        "contents[].volume_ul": "uL",
+        "contents[].max_volume_ul": "uL",
+    },
+    "pick_up_tips": {"channels_used[]": "1"},
+    "drop_tips": {"channels_used[]": "1"},
+    "return_tips": {"channels_used[]": "1"},
+    "discard_tips": {"channels_used[]": "1"},
     "aspirate": {"total_volume_ul": "uL"},
     "dispense": {"total_volume_ul": "uL"},
     "transfer": {"total_volume_ul": "uL"},

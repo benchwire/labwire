@@ -27,6 +27,7 @@ from labwire.bridges.pylabrobot.addressing import address_of
 from labwire.bridges.pylabrobot.annotations import AnnotationFile, annotation_for
 from labwire.bridges.pylabrobot.introspect import (
     DraftLabware,
+    Grid,
     LabwareKind,
     addressable_resources,
     introspect,
@@ -42,7 +43,7 @@ class ChannelState(BaseModel):
         False
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     index: int
     has_tip: bool
@@ -61,7 +62,7 @@ class WellContents(BaseModel):
         200.0
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     address: str
     volume_ul: float
@@ -75,14 +76,14 @@ class LabwareState(BaseModel):
         >>> # state.find("acid_stock").hazard
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     address: str
     kind: LabwareKind
     type_name: str
     model: str | None = None
     location_mm: tuple[float, float, float] | None = None
-    grid: Any = None
+    grid: Grid | None = None
     description: str | None = None
     hazard: str | None = None
     """What the annotation file says this holds, surfaced so an agent can see it."""
@@ -101,7 +102,7 @@ class DeckState(BaseModel):
         >>> # deck_state(lh, annotations).contents
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     labware: list[LabwareState]
     channels: list[ChannelState]

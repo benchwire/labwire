@@ -70,7 +70,7 @@ class Grid(BaseModel):
         96
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     rows: int
     columns: int
@@ -95,7 +95,7 @@ class DraftLabware(BaseModel):
         >>> # 'source_plate'
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     address: str
     """The name this labware is addressed by (also its PyLabRobot name)."""
@@ -116,7 +116,7 @@ class DraftCommand(BaseModel):
         >>> # {c.name: c.safety_class for c in draft.commands}
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: str
     description: str
@@ -130,7 +130,7 @@ class Unresolved(BaseModel):
         >>> # [u.message for u in draft.unresolved]
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     address: str
     reason: UnresolvedReason
@@ -144,7 +144,7 @@ class DraftInstrument(BaseModel):
         >>> # draft.channel_count
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     identity: IdentityInfo
     backend_class: str

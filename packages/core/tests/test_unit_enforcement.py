@@ -25,7 +25,7 @@ from labwire.core.capabilities import (
     numeric_property_names,
 )
 from labwire.core.server import CommandContext, command
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 # --- layer 1: declaration time ----------------------------------------------
 
@@ -180,7 +180,7 @@ def test_a_reference_into_defs_is_followed() -> None:
 
 
 def test_an_array_result_needs_returns_units() -> None:
-    with pytest.raises(TypeError, match="returns_units"):
+    with pytest.raises(TypeError, match="name no field"):
 
         @command()
         async def measure(  # pyright: ignore[reportUnusedFunction]
@@ -192,6 +192,8 @@ def test_an_array_result_needs_returns_units() -> None:
 
 class Readings(BaseModel):
     """A result model whose quantity arrives as an array."""
+
+    model_config = ConfigDict(extra="forbid")
 
     volumes_ul: list[float]
     wells: list[str]
@@ -252,6 +254,7 @@ def test_an_object_parameter_with_numeric_fields_is_refused_with_advice() -> Non
         "$defs": {
             "Setpoint": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     "temperature_c": {"type": "number"},
                     "pressure_kpa": {"type": "number"},
@@ -271,9 +274,8 @@ def test_an_object_parameter_with_numeric_fields_is_refused_with_advice() -> Non
             }
         )
     message = str(caught.value)
-    assert "'setpoint'" in message
-    assert "temperature_c" in message
-    assert "pressure_kpa" in message
+    assert "setpoint.temperature_c" in message  # the path, not just the name
+    assert "setpoint.pressure_kpa" in message
     assert "label" not in message  # only the quantities are the problem
     assert "Flatten" in message
 
@@ -294,7 +296,9 @@ def test_an_object_parameter_with_numeric_fields_is_refused_with_advice() -> Non
         ({"anyOf": [{"type": "string"}, {"type": "null"}]}, False),
         ({"prefixItems": [{"type": "string"}, {"type": "number"}]}, True),
         ({"additionalProperties": {"type": "number"}}, True),
-        ({}, False),
+        # An unconstrained schema permits anything, a quantity included, so it
+        # counts. Failing open here is what let the shipped bridge leak.
+        ({}, True),
         # A descriptor arriving over the wire was not necessarily written by
         # pydantic, so the other legal ways to say "number" have to count too.
         ({"type": ["number", "null"]}, True),
@@ -337,3 +341,197 @@ def test_identity_is_unaffected() -> None:
         IdentityInfo(manufacturer="m", model="d", serial_number="s", firmware_version="1").model
         == "d"
     )
+
+
+# --- regressions from the adversarial audit of the F5 fix -------------------
+#
+# Every case below was found by an audit that set out to break the guarantee
+# after the first fix landed, and each was reproduced against a running server
+# before being fixed. They are grouped here so a future change that reopens one
+# fails loudly.
+
+
+def _refuses(params: dict[str, Any], units: dict[str, str] | None = None) -> str:
+    with pytest.raises(ValidationError) as caught:
+        CommandSpec.model_validate(
+            {
+                "name": "pour",
+                "title": "Pour",
+                "description": "Pour.",
+                "params_schema": params,
+                "unit_annotations": units or {},
+                "interruptible": False,
+            }
+        )
+    return str(caught.value)
+
+
+def _closed(properties: dict[str, Any], **extra: Any) -> dict[str, Any]:
+    return {"type": "object", "additionalProperties": False, "properties": properties, **extra}
+
+
+def test_an_open_mapping_cannot_be_vouched_for() -> None:
+    """`dict[str, Any]` shipped millimetres from the PyLabRobot bridge."""
+    assert "does not say" in _refuses({"type": "object", "additionalProperties": True})
+
+
+def test_an_object_that_does_not_close_its_properties_is_refused() -> None:
+    """An undeclared extra member can be a quantity."""
+    assert "does not say" in _refuses({"type": "object", "properties": {}})
+
+
+def test_an_array_that_does_not_declare_its_items_is_refused() -> None:
+    assert "does not say" in _refuses(_closed({"points": {"type": "array"}}))
+
+
+def test_a_model_inside_a_container_does_not_hide_its_fields() -> None:
+    """`list[Model]` escaped while a bare `Model` was refused."""
+    schema = _closed(
+        {"readings": {"type": "array", "items": {"$ref": "#/$defs/R"}}},
+        **{"$defs": {"R": _closed({"absorbance_au": {"type": "number"}})}},
+    )
+    assert "readings[].absorbance_au" in _refuses(schema)
+
+
+def test_a_root_level_ref_does_not_hide_the_whole_property_set() -> None:
+    """The entry points used to read `properties` without resolving."""
+    schema = {
+        "$ref": "#/$defs/Common",
+        "$defs": {"Common": _closed({"volume_ul": {"type": "number"}})},
+    }
+    assert "volume_ul" in _refuses(schema)
+
+
+def test_a_multi_hop_ref_chain_is_followed() -> None:
+    schema = _closed(
+        {"v": {"$ref": "#/$defs/A"}},
+        **{"$defs": {"A": {"$ref": "#/$defs/B"}, "B": {"type": "number"}}},
+    )
+    assert "'v'" in _refuses(schema)
+
+
+def test_a_draft_07_definitions_pointer_is_followed() -> None:
+    """Most non-Python schema generators emit `definitions`, not `$defs`."""
+    schema = _closed(
+        {"v": {"$ref": "#/definitions/N"}}, **{"definitions": {"N": {"type": "number"}}}
+    )
+    assert "'v'" in _refuses(schema)
+
+
+def test_an_unresolvable_ref_fails_closed() -> None:
+    """A reference this build cannot follow is one it cannot vouch for."""
+    assert "does not say" in _refuses(_closed({"v": {"$ref": "#/$defs/Missing"}}))
+
+
+def test_a_remote_ref_fails_closed() -> None:
+    assert "does not say" in _refuses(_closed({"v": {"$ref": "https://example.test/s.json"}}))
+
+
+def test_a_broken_ref_does_not_erase_a_sibling_type() -> None:
+    """Siblings of `$ref` are legal in 2020-12 and must survive."""
+    schema = _closed({"v": {"$ref": "#/$defs/Missing", "type": "number"}})
+    assert "does not say" in _refuses(schema)
+
+
+def test_pattern_properties_are_walked() -> None:
+    """pydantic emits these for a dict with a constrained key type."""
+    schema = _closed(
+        {
+            "rates": {
+                "type": "object",
+                "patternProperties": {"^c": {"type": "number"}},
+                "additionalProperties": False,
+            }
+        }
+    )
+    assert "rates" in _refuses(schema)
+
+
+@pytest.mark.parametrize("keyword", ["unevaluatedItems", "additionalItems", "contains"])
+def test_other_array_keywords_are_walked(keyword: str) -> None:
+    schema = _closed(
+        {"v": {"type": "array", "items": {"type": "string"}, keyword: {"type": "number"}}}
+    )
+    assert "v[]" in _refuses(schema)
+
+
+def test_the_draft_07_tuple_form_of_items_is_walked() -> None:
+    """`items` as a list is the eight-channel volume tuple, spelled draft-07."""
+    schema = _closed({"volumes": {"type": "array", "items": [{"type": "number"}] * 8}})
+    assert "volumes" in _refuses(schema)
+
+
+def test_a_cyclic_ref_terminates() -> None:
+    schema = {
+        "$ref": "#/$defs/Node",
+        "$defs": {"Node": _closed({"child": {"$ref": "#/$defs/Node"}, "v": {"type": "number"}})},
+    }
+    assert "v" in _refuses(schema)
+
+
+def test_an_if_then_else_branch_is_walked() -> None:
+    schema = _closed(
+        {"v": {"if": {"const": "a"}, "then": {"type": "number"}, "else": {"type": "string"}}}
+    )
+    assert "'v'" in _refuses(schema)
+
+
+def test_a_covered_path_satisfies_its_descendants() -> None:
+    """Annotating a container annotates the quantities inside it."""
+    schema = _closed(
+        {"readings": {"type": "array", "items": {"$ref": "#/$defs/R"}}},
+        **{"$defs": {"R": _closed({"volume_ul": {"type": "number"}})}},
+    )
+    with pytest.raises(ValidationError):
+        CommandSpec.model_validate(
+            {
+                "name": "r",
+                "title": "R",
+                "description": "R.",
+                "params_schema": schema,
+                "interruptible": False,
+            }
+        )  # nested params are refused outright; results are where paths apply
+
+
+def test_result_paths_may_be_annotated_by_path() -> None:
+    """A result is legitimately a tree, so its units are keyed by path."""
+    returns = _closed(
+        {"labware": {"type": "array", "items": {"$ref": "#/$defs/L"}}},
+        **{
+            "$defs": {"L": _closed({"location_mm": {"type": "array", "items": {"type": "number"}}})}
+        },
+    )
+    spec = CommandSpec.model_validate(
+        {
+            "name": "describe",
+            "title": "Describe",
+            "description": "Describe.",
+            "params_schema": {"type": "object", "additionalProperties": False},
+            "returns_schema": returns,
+            "returns_units": {"labware[].location_mm": "mm"},
+            "interruptible": False,
+        }
+    )
+    assert spec.returns_units["labware[].location_mm"] == "mm"
+
+
+def test_an_unannotated_result_path_is_still_refused() -> None:
+    returns = _closed(
+        {"labware": {"type": "array", "items": {"$ref": "#/$defs/L"}}},
+        **{
+            "$defs": {"L": _closed({"location_mm": {"type": "array", "items": {"type": "number"}}})}
+        },
+    )
+    with pytest.raises(ValidationError, match=r"labware\[\]\.location_mm"):
+        CommandSpec.model_validate(
+            {
+                "name": "describe",
+                "title": "Describe",
+                "description": "Describe.",
+                "params_schema": {"type": "object", "additionalProperties": False},
+                "returns_schema": returns,
+                "returns_units": {},
+                "interruptible": False,
+            }
+        )
