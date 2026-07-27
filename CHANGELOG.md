@@ -18,6 +18,16 @@ changes are expected until then, and are called out explicitly.
   opt-in; everything else stops at refusals servers must issue before
   running anything. CI runs it against the reference server.
 
+- **Property-based wire fuzzing** (hypothesis, deterministic in CI):
+  arbitrary JSON-RPC envelopes and submit params never kill a session and
+  always draw a taxonomy-tagged answer; pathologically deep payloads
+  survive; any content-changing byte flip or truncation of a signed bundle
+  fails verification (formatting-only flips legitimately still verify,
+  since signatures bind RFC 8785 canonical content, not raw bytes), and
+  unparseable or non-UTF-8 manifests get a verdict, not a traceback.
+  Honest result: the fuzz found no new breaks; the one wire gap of the
+  day (below) was found by the conformance suite first.
+
 ### Fixed
 
 - The WebSocket transport silently dropped unparseable frames instead of
