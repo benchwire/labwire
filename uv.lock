@@ -12,6 +12,7 @@ resolution-markers = [
 members = [
     "labwire",
     "labwire-cli",
+    "labwire-conformance",
     "labwire-core",
     "labwire-drivers",
     "labwire-mcp",
@@ -556,6 +557,37 @@ dependencies = [
 requires-dist = [
     { name = "labwire-core", editable = "packages/core" },
     { name = "typer", specifier = ">=0.12" },
+]
+
+[[package]]
+name = "labwire-conformance"
+version = "0.3.0"
+source = { editable = "packages/conformance" }
+dependencies = [
+    { name = "jsonschema" },
+    { name = "labwire-core" },
+    { name = "typer" },
+    { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "labwire-drivers" },
+    { name = "labwire-sim" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "jsonschema", specifier = ">=4.21" },
+    { name = "labwire-core", editable = "packages/core" },
+    { name = "typer", specifier = ">=0.12" },
+    { name = "websockets", specifier = ">=13" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "labwire-drivers", editable = "packages/drivers" },
+    { name = "labwire-sim", editable = "packages/sim" },
 ]
 
 [[package]]

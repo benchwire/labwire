@@ -47,7 +47,12 @@ class WebSocketTransport:
             raise TransportClosed("websocket connection closed") from exc
 
     async def receive(self) -> dict[str, Any]:
-        """Receive the next text frame as a message; binary frames are skipped."""
+        """Receive the next text frame as a message; binary frames are skipped.
+
+        Frames that are not valid JSON get a ``-32700`` error response and
+        valid JSON that is not an object gets ``-32600`` (SPEC §12); both
+        with a null id, and the session survives either.
+        """
         while True:
             try:
                 frame = await self._connection.recv()
@@ -58,10 +63,20 @@ class WebSocketTransport:
             try:
                 parsed: Any = json.loads(frame)
             except json.JSONDecodeError:
-                continue  # unparseable frame: skip; the session must survive
+                await self._answer_garbage(-32700, "parse error: frame is not valid JSON")
+                continue
             if isinstance(parsed, dict):
                 return parsed  # pyright: ignore[reportUnknownVariableType]
-            # non-object payloads are not JSON-RPC 2.0 messages; skip them
+            await self._answer_garbage(-32600, "invalid request: frame is not a JSON object")
+
+    async def _answer_garbage(self, code: int, message: str) -> None:
+        """Answer an unusable frame with a standard JSON-RPC error, id null."""
+        payload = {"jsonrpc": "2.0", "id": None, "error": {"code": code, "message": message}}
+        try:
+            async with self._send_lock:
+                await self._connection.send(json.dumps(payload))
+        except ConnectionClosed:
+            pass  # the peer is gone; the next recv raises TransportClosed
 
     async def close(self) -> None:
         """Close the WebSocket connection; idempotent."""

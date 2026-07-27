@@ -4,6 +4,27 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
+## Unreleased
+
+### Added
+
+- **`labwire-conformance`** (SPEC §15.3): an executable conformance suite
+  that points at ANY server over WebSocket and checks the spec's normative
+  requirements: handshake and version negotiation, descriptor validity and
+  mandatory units, S2/S3 refusal semantics, resource reads and reference
+  validation, error taxonomy, and signed-bundle verification including
+  tamper detection. Binary pass/fail per check with spec references; the
+  verdict is the §15.1 level actually earned. Command-executing checks are
+  opt-in; everything else stops at refusals servers must issue before
+  running anything. CI runs it against the reference server.
+
+### Fixed
+
+- The WebSocket transport silently dropped unparseable frames instead of
+  answering `-32700` (and non-object JSON instead of `-32600`) as SPEC §12
+  requires. Found by running the new conformance suite against the
+  reference server on its first day.
+
 ## 0.3.0, 2026-07-27
 
 Protocol version `"0.3"`: things, not only quantities. Driven by findings

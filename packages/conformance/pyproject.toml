@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-conformance"
+version = "0.3.0"
+description = "Executable conformance suite for Labwire protocol servers"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+keywords = ["laboratory", "instruments", "protocol", "conformance", "testing"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = [
+  "labwire-core",
+  "jsonschema>=4.21",
+  "typer>=0.12",
+  "websockets>=13",
+]
+
+[project.scripts]
+labwire-conformance = "labwire.conformance.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/benchwire/labwire"
+Repository = "https://github.com/benchwire/labwire"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]
+
+[dependency-groups]
+dev = ["labwire-sim", "labwire-drivers"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+labwire-sim = { workspace = true }
+labwire-drivers = { workspace = true }

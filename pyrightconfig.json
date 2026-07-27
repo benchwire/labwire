@@ -19,7 +19,8 @@
     "packages/cli/src",
     "packages/mcp/src",
     "packages/bridges/ophyd/src",
-    "packages/bridges/pylabrobot/src"
+    "packages/bridges/pylabrobot/src",
+    "packages/conformance/src"
   ],
   "executionEnvironments": [
     {
@@ -131,6 +132,40 @@
       "reportUnknownVariableType": "none",
       "reportUnknownArgumentType": "none",
       "reportArgumentType": "none"
+    },
+    {
+      "root": "packages/conformance/src",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src",
+        "packages/conformance/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none"
+    },
+    {
+      "root": "packages/conformance/tests",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src",
+        "packages/conformance/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none"
     }
   ]
 }

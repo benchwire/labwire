@@ -12,10 +12,20 @@ TARGET = "labwire.bridges.pylabrobot.tests_support:build"
 @pytest.fixture(autouse=True)
 def _support_module(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
     """Expose the test rig as an importable factory for the CLI to load."""
+    import importlib.util
     import sys
     import types
 
-    from conftest import CHANNELS
+    # A plain `from conftest import ...` resolves to whichever tests dir got
+    # onto sys.path last, so load THIS package's conftest by its path.
+    conftest_path = Path(__file__).parent / "conftest.py"
+    conftest_spec = importlib.util.spec_from_file_location("_plr_conftest", conftest_path)
+    assert conftest_spec is not None
+    assert conftest_spec.loader is not None
+    plr_conftest = importlib.util.module_from_spec(conftest_spec)
+    conftest_spec.loader.exec_module(plr_conftest)
+    channels: int = plr_conftest.CHANNELS
+
     from pylabrobot.liquid_handling import LiquidHandler
     from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
     from pylabrobot.resources import Cor_96_wellplate_360ul_Fb
@@ -24,7 +34,7 @@ def _support_module(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore
     async def build() -> LiquidHandler:
         deck = STARLetDeck()
         handler = LiquidHandler(
-            backend=LiquidHandlerChatterboxBackend(num_channels=CHANNELS), deck=deck
+            backend=LiquidHandlerChatterboxBackend(num_channels=channels), deck=deck
         )
         await handler.setup()
         deck.assign_child_resource(hamilton_96_tiprack_1000uL_filter(name="tips"), rails=1)

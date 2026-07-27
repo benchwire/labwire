@@ -1235,6 +1235,13 @@ A server MUST document its level. A client MUST tolerate a server of any
 level (the capability flags in the `initialize` *result* tell it what to
 expect).
 
+Some requirements are **capability-conditional** rather than level-bound:
+they apply, at every level, exactly when the server declares the feature.
+A server declaring resources must satisfy §10; a server declaring commands
+with `resource_ref` parameters must satisfy §7.2 and §10.4; a server
+declaring `S2`/`S3` commands must satisfy §8.6. A server declaring none of
+these owes none of them.
+
 ### 15.2 Reference implementation status (v0.3)
 
 Honesty table, what the reference implementation in this repository
@@ -1258,6 +1265,33 @@ implements:
 | In-memory transport (test-only; not a §5 transport) | Implemented |
 
 This table is updated with each release.
+
+### 15.3 Proving a level
+
+`labwire-conformance` (the `packages/conformance` distribution) renders
+these requirements as executable checks. Each check is binary pass/fail
+and names the spec section it tests; the verdict is the highest level of
+§15.1 at which every applicable check passes. There are no percentages: a
+failed MUST is nonconformance, and the honest statement of partial
+progress is the check list itself, not a score.
+
+```bash
+pip install labwire-conformance
+labwire-conformance ws://HOST:PORT --claim core
+```
+
+Checks that would execute a command on the instrument are opt-in
+(`--exercise COMMAND`, on a deployment where that is safe); everything
+else stops at refusals the server must issue before running anything. The
+signed-manifest checks need `--bundle-dir` pointing where the server
+writes run bundles. A claim of "conformant at level X" made without the
+opt-in checks is not supported by the tool, and the report says exactly
+which proof is missing.
+
+The suite trusts the reference message models as the executable rendering
+of §16, and it grows as findings do: passing it proves the checked
+behaviors, not the absence of every bug. In this repository's CI the
+suite runs against the reference server on every commit.
 
 ## 16. JSON Message Reference
 

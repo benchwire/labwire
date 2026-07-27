@@ -74,3 +74,39 @@ async def test_send_after_close_raises() -> None:
     finally:
         server.close()
         await server.wait_closed()
+
+
+async def test_unparseable_frame_gets_parse_error_and_session_survives() -> None:
+    """SPEC 12: garbage in one frame answers -32700 without killing the link."""
+    server, port = await _echo_server()
+    try:
+        transport = await WebSocketTransport.connect(f"ws://127.0.0.1:{port}")
+        # The echo server reflects whatever we send, so send garbage to
+        # ourselves: OUR transport must answer it with -32700 (which the echo
+        # then reflects back for us to observe) and keep the session alive.
+        await transport._connection.send("this is not json {")  # pyright: ignore[reportPrivateUsage]
+        answer = await transport.receive()
+        assert answer["error"]["code"] == -32700
+        assert answer["id"] is None
+        good: dict[str, Any] = {"jsonrpc": "2.0", "id": 2, "method": "ping", "params": {}}
+        await transport.send(good)
+        assert await transport.receive() == good
+        await transport.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def test_non_object_json_gets_invalid_request() -> None:
+    """SPEC 12: a JSON array or scalar frame answers -32600, id null."""
+    server, port = await _echo_server()
+    try:
+        transport = await WebSocketTransport.connect(f"ws://127.0.0.1:{port}")
+        await transport._connection.send("[1, 2, 3]")  # pyright: ignore[reportPrivateUsage]
+        answer = await transport.receive()
+        assert answer["error"]["code"] == -32600
+        assert answer["id"] is None
+        await transport.close()
+    finally:
+        server.close()
+        await server.wait_closed()
