@@ -313,3 +313,100 @@ def test_jcs_number_formatting_matches_rfc8785() -> None:
     ]
     for value, expected in cases:
         assert _jcs_dumps(value) == expected, value
+
+
+# --- the run-reaping safety net --------------------------------------------
+#
+# A run's task normally reaches a terminal state inside ``_execute``, which
+# handles its own cancellation. The safety net exists for the case ``_execute``
+# cannot handle: a task killed *before its first step*, so the coroutine body
+# never runs at all. That is the shape of the M2 review finding, where an
+# interlock cancelled a not-yet-started task and left its capacity slot
+# occupied forever. Reproducing it means cancelling within the same event-loop
+# iteration that created the task, which no client-side timing can do — hence
+# the fixture below.
+
+
+def _kill_next_run(
+    monkeypatch: pytest.MonkeyPatch,
+    server: InstrumentServer,
+    *,
+    fault: InterlockError | None = None,
+) -> None:
+    """Make the next command task die before it can take its first step.
+
+    Optionally recording a fault against the run first, the way an interlock
+    trip does — the ordering matters, since a fault noticed after the reap
+    has already run would be too late to be reported.
+    """
+    real_create_task = asyncio.create_task
+    armed = True
+
+    def create_and_kill(coro: Any, **kwargs: Any) -> Any:
+        nonlocal armed
+        task = real_create_task(coro, **kwargs)
+        if armed and getattr(coro, "__qualname__", "").endswith("_execute"):
+            armed = False
+            if fault is not None:
+                pending = [r for r in server._runs.values() if r.task is None]  # pyright: ignore[reportPrivateUsage]
+                pending[-1].fail_reason = fault
+            task.cancel()  # never scheduled: _execute's body will not run
+        return task
+
+    monkeypatch.setattr(asyncio, "create_task", create_and_kill)
+
+
+async def test_a_stillborn_run_task_still_reaches_a_terminal_state(
+    wired: tuple[Doser, InstrumentServer, LabwireClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run whose task never ran must still end up terminal and inactive."""
+    _dosed, server, client = wired
+    _kill_next_run(monkeypatch, server)
+    handle = await client.submit("hold", {})
+    await _settled(server, handle.command_id)
+
+    record = server.run_records[handle.command_id]
+    assert record.status == "canceled"
+    assert "started" in record.timestamps  # the manifest window is still closed
+    assert server._active_runs() == []  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_stillborn_run_with_a_recorded_fault_is_reported_failed(
+    wired: tuple[Doser, InstrumentServer, LabwireClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Killed carrying a fault — an interlock trip — it reports that fault."""
+    _dosed, server, client = wired
+    _kill_next_run(monkeypatch, server, fault=InterlockError("spill detected"))
+    handle = await client.submit("hold", {})
+    await _settled(server, handle.command_id)
+
+    status = await handle.status()
+    assert status.status == "failed"
+    assert status.error is not None
+    assert status.error.data is not None
+    assert status.error.data.category == "interlock"
+
+
+async def test_the_capacity_slot_a_stillborn_run_held_is_released(
+    wired: tuple[Doser, InstrumentServer, LabwireClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After reaping, the instrument accepts work instead of reporting busy."""
+    _dosed, server, client = wired
+    _kill_next_run(monkeypatch, server)
+    doomed = await client.submit("hold", {})
+    await _settled(server, doomed.command_id)
+
+    follow_up = await client.submit("dose", {})  # would raise BusyError if leaked
+    assert await follow_up.result(timeout=5.0) == {"dosed_ul": 1.0}
+
+
+async def _settled(server: InstrumentServer, command_id: str, timeout: float = 5.0) -> None:
+    """Wait until a run reaches a terminal state, or fail loudly."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while server.run_records[command_id].status not in {"succeeded", "failed", "canceled"}:
+        assert loop.time() < deadline, "run never reached a terminal state"
+        await asyncio.sleep(0.01)

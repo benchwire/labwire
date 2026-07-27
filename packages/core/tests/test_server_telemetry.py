@@ -244,3 +244,93 @@ async def test_run_record_empty_stream_digests_to_empty_sha256(
     record = server.run_records[submit["command_id"]]
     assert record.digest == hashlib.sha256(b"").hexdigest()
     assert record.channels == []
+
+
+# --- channel dtype enforcement (SPEC §7.3) ---------------------------------
+
+
+class TypedChannels(Instrument):
+    """One channel per declared dtype, to prove each rejects the wrong type."""
+
+    identity = IdentityInfo(
+        manufacturer="Labwire Project",
+        model="TypedRig-1",
+        serial_number="SIM-0041",
+        firmware_version="0.2.0",
+    )
+
+    counts = channel("counts", unit="1", dtype="int64", description="A whole number.")
+    flag = channel("flag", unit="1", dtype="bool", description="A boolean.")
+    label = channel("label", unit="1", dtype="string", description="Some text.")
+
+    @command()
+    async def idle(self, ctx: CommandContext) -> None:
+        """Do nothing; this instrument exists for its channels."""
+
+
+@pytest.fixture
+async def typed() -> AsyncIterator[tuple[TypedChannels, InstrumentServer, JsonRpcSession, _Notes]]:
+    instrument = TypedChannels()
+    server = InstrumentServer(instrument)
+    client_end, server_end = MemoryTransport.pair()
+    server.attach(server_end)
+    notes = _Notes()
+    session = JsonRpcSession(client_end, notification_handler=notes.collect)
+    async with session:
+        await session.request(
+            "initialize",
+            {
+                "protocol_version": "0.2",
+                "client_info": {"name": "t", "version": "0"},
+                "capabilities": {},
+            },
+        )
+        await session.notify("notifications/initialized", {})
+        yield instrument, server, session, notes
+    await server.aclose()
+
+
+@pytest.mark.parametrize(
+    ("channel_name", "bad_value", "reason"),
+    [
+        ("counts", 1.5, "expected int64"),
+        ("counts", True, "expected int64"),  # bool is not a number here
+        ("counts", "seven", "expected int64"),
+        ("counts", 2**53, "exactly-representable"),
+        ("flag", 1, "expected bool"),
+        ("flag", "true", "expected bool"),
+        ("label", 42, "expected string"),
+    ],
+)
+async def test_wrong_typed_samples_are_suppressed_and_reported(
+    typed: tuple[TypedChannels, InstrumentServer, JsonRpcSession, _Notes],
+    channel_name: str,
+    bad_value: object,
+    reason: str,
+) -> None:
+    instrument, _server, session, notes = typed
+    subscription = await session.request("telemetry/subscribe", {"channels": [channel_name]})
+    assert subscription["subscription_id"]
+    getattr(instrument, channel_name).publish(bad_value)
+    await notes.wait_for("notifications/event", 1)
+    event = notes.named("notifications/event")[0]
+    assert event["name"] == "error/occurred"
+    assert event["data"]["channel"] == channel_name
+    assert reason in event["data"]["reason"]
+    assert notes.named("notifications/telemetry") == []  # nothing was delivered
+
+
+@pytest.mark.parametrize(
+    ("channel_name", "good_value"),
+    [("counts", 7), ("flag", True), ("label", "ok")],
+)
+async def test_correctly_typed_samples_are_delivered(
+    typed: tuple[TypedChannels, InstrumentServer, JsonRpcSession, _Notes],
+    channel_name: str,
+    good_value: object,
+) -> None:
+    instrument, _server, session, notes = typed
+    await session.request("telemetry/subscribe", {"channels": [channel_name]})
+    getattr(instrument, channel_name).publish(good_value)
+    await notes.wait_for("notifications/telemetry", 1)
+    assert notes.named("notifications/telemetry")[0]["value"] == good_value
