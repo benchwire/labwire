@@ -50,13 +50,7 @@ jobs:
 
   publish:
     needs: build
-    # Wave filter: on dispatch, publish only the named projects (exact
-    # token match, comma-delimited); release events publish everything.
-    if: >-
-      vars.PYPI_PUBLISHERS_READY == 'true' &&
-      (github.event_name != 'workflow_dispatch' ||
-       inputs.only == 'all' || inputs.only == '' ||
-       contains(format(',{0},', inputs.only), format(',{0},', matrix.project)))
+    if: vars.PYPI_PUBLISHERS_READY == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -84,16 +78,31 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    # The wave filter lives on the steps because a job-level `if` cannot
+    # see the matrix context; every step below no-ops when this project is
+    # not in the dispatched wave.
     steps:
       - uses: actions/download-artifact@v6
+        if: >-
+          github.event_name != 'workflow_dispatch' ||
+          inputs.only == 'all' || inputs.only == '' ||
+          contains(format(',{0},', inputs.only), format(',{0},', matrix.project))
         with:
           name: dist
           path: dist/
       - name: Select this project's distributions
+        if: >-
+          github.event_name != 'workflow_dispatch' ||
+          inputs.only == 'all' || inputs.only == '' ||
+          contains(format(',{0},', inputs.only), format(',{0},', matrix.project))
         run: |
           mkdir upload
           cp dist/${{ matrix.files }} upload/
           ls -l upload/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        if: >-
+          github.event_name != 'workflow_dispatch' ||
+          inputs.only == 'all' || inputs.only == '' ||
+          contains(format(',{0},', inputs.only), format(',{0},', matrix.project))
         with:
           packages-dir: upload/
