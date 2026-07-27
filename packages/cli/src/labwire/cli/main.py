@@ -29,6 +29,42 @@ def _root() -> None:  # pyright: ignore[reportUnusedFunction] - registered by ty
 
 
 @app.command()
+def probe(
+    target: Annotated[
+        str | None,
+        typer.Argument(help="SCPI endpoint as HOST:PORT (TCP)."),
+    ] = None,
+    serial: Annotated[
+        str | None,
+        typer.Option(help="Probe a serial device path instead of TCP."),
+    ] = None,
+    baud: Annotated[int, typer.Option(help="Serial baud rate.")] = 9600,
+    out: Annotated[
+        Path | None,
+        typer.Option(help="Where to write the draft annotation (default: ./<model>.yaml)."),
+    ] = None,
+) -> None:
+    """Ask a SCPI endpoint ``*IDN?`` and draft its annotation file.
+
+    The draft records the identity the instrument reported and marks
+    everything else TODO; it is a starting point for a deployment file,
+    never a capability claim. See docs/HARDWARE.md.
+    """
+    from labwire.cli.probe import draft_annotation, run_probe, slug
+
+    try:
+        identity, endpoint_lines = run_probe(target, serial, baud)
+    except (ValueError, ConnectionError, OSError, RuntimeError) as exc:
+        typer.echo(f"probe failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    draft = draft_annotation(identity, endpoint_lines)
+    path = out if out is not None else Path(f"{slug(identity['model'])}.yaml")
+    path.write_text(draft)
+    typer.echo(draft.rstrip("\n"))
+    typer.echo(f"\ndraft written: {path}")
+
+
+@app.command()
 def verify(bundle: Path) -> None:
     """Verify a signed run bundle (a directory with manifest.json, or the file itself).
 

@@ -10,10 +10,13 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core"]
+dependencies = ["labwire-core", "pyyaml>=6"]
+
+[project.optional-dependencies]
+serial = ["pyserial-asyncio-fast>=0.16", "pyserial>=3.5"]
 
 [dependency-groups]
-dev = ["labwire-sim"]
+dev = ["labwire-sim", "pyserial-asyncio-fast>=0.16", "pyserial>=3.5"]
 
 [tool.uv.sources]
 labwire-core = { workspace = true }

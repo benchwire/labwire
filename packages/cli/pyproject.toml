@@ -10,13 +10,18 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core", "typer>=0.12"]
+dependencies = ["labwire-core", "labwire-drivers", "typer>=0.12"]
 
 [project.scripts]
 labwire = "labwire.cli.main:main"
 
+[dependency-groups]
+dev = ["labwire-sim"]
+
 [tool.uv.sources]
 labwire-core = { workspace = true }
+labwire-drivers = { workspace = true }
+labwire-sim = { workspace = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/labwire"]

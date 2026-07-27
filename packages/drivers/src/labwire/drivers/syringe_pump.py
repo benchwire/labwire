@@ -102,9 +102,13 @@ class SyringePump(Instrument):
         item_kinds=[],
     )
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(
+        self, host: str = "", port: int = 0, *, link: LineProtocolClient | None = None
+    ) -> None:
         super().__init__()
-        self._link = LineProtocolClient(host, port)
+        # A prebuilt link (LineProtocolClient.serial(...) for USB-serial)
+        # overrides host/port, which remain the TCP shorthand.
+        self._link = link if link is not None else LineProtocolClient(host, port)
         self._dispensed_total = 0.0
 
     @syringe.reader

@@ -28,6 +28,19 @@ changes are expected until then, and are called out explicitly.
   Honest result: the fuzz found no new breaks; the one wire gap of the
   day (below) was found by the conformance suite first.
 
+- **Hardware-ready transports** in `labwire-drivers`: the line-protocol
+  link is now pluggable, TCP (as before) or USB-serial via the
+  `labwire-drivers[serial]` extra (pyserial-asyncio-fast, BSD-3-Clause,
+  the maintained successor of pyserial-asyncio; optional, never
+  vendored). Drivers accept a prebuilt `link=`. New: an endpoint file
+  format (`load_endpoints`, strict, unknown keys are errors), a
+  `labwire probe` command that asks a SCPI endpoint `*IDN?` and drafts
+  its annotation file with TODOs for everything a probe cannot know, and
+  docs/HARDWARE.md, the walkthrough for the day real equipment arrives.
+  Status stated everywhere it matters: real transports, tested against
+  simulators (TCP against the sims, serial against a PTY responder),
+  awaiting hardware; no vendor compatibility is claimed.
+
 ### Fixed
 
 - The WebSocket transport silently dropped unparseable frames instead of

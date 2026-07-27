@@ -101,9 +101,13 @@ class PowerSupply(Instrument):
         kind="soft",
     )
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(
+        self, host: str = "", port: int = 0, *, link: LineProtocolClient | None = None
+    ) -> None:
         super().__init__()
-        self._link = LineProtocolClient(host, port)
+        # A prebuilt link (LineProtocolClient.serial(...) for USB-serial)
+        # overrides host/port, which remain the TCP shorthand.
+        self._link = link if link is not None else LineProtocolClient(host, port)
 
     async def on_start(self, server: InstrumentServer) -> None:
         """Connect, verify identification, and start the monitoring loop."""
