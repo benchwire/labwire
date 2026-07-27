@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 from labwire.core.capabilities import IdentityInfo
@@ -11,6 +11,15 @@ from labwire.core.errors import BusyError, NotCancelableError, UnsupportedError,
 from labwire.core.server import CommandContext, Instrument, InstrumentServer, command
 from labwire.core.session import JsonRpcSession
 from labwire.core.transport import MemoryTransport
+from pydantic import ConfigDict
+
+
+class Sum(TypedDict):
+    """A closed result schema for the test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    sum: float
 
 
 class FakeClock:
@@ -42,7 +51,7 @@ class Rig(Instrument):
         self.release = asyncio.Event()
 
     @command(units={"a": "1", "b": "1"}, returns_units={"sum": "1"})
-    async def add(self, ctx: CommandContext, a: float, b: float) -> dict[str, float]:
+    async def add(self, ctx: CommandContext, a: float, b: float) -> Sum:
         """Add two numbers instantly."""
         return {"sum": a + b}
 

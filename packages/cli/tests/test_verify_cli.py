@@ -4,6 +4,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 from labwire.core import (
@@ -15,6 +16,15 @@ from labwire.core import (
     MemoryTransport,
     command,
 )
+from pydantic import ConfigDict
+
+
+class ClickResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    clicked: int
 
 
 class Clicker(Instrument):
@@ -28,7 +38,7 @@ class Clicker(Instrument):
     )
 
     @command(units={"times": "1"}, returns_units={"clicked": "1"})
-    async def click(self, ctx: CommandContext, times: int = 1) -> dict[str, int]:
+    async def click(self, ctx: CommandContext, times: int = 1) -> ClickResult:
         """Click a relay."""
         ctx.emit_event("x-sim/click", "info", {"times": times})
         return {"clicked": times}

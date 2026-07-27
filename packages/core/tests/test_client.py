@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from typing import TypedDict
 
 import pytest
 from labwire.core.capabilities import IdentityInfo, InstrumentDescriptor
@@ -15,6 +16,15 @@ from labwire.core.server import (
     command,
 )
 from labwire.core.transport import MemoryTransport
+from pydantic import ConfigDict
+
+
+class SpinResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    reached_rpm: float
 
 
 class Stirrer(Instrument):
@@ -30,7 +40,7 @@ class Stirrer(Instrument):
     rpm = channel("rpm", unit="1/min", description="Rotor speed.")
 
     @command(units={"target_rpm": "1/min"}, returns_units={"reached_rpm": "1/min"})
-    async def spin(self, ctx: CommandContext, target_rpm: float) -> dict[str, float]:
+    async def spin(self, ctx: CommandContext, target_rpm: float) -> SpinResult:
         """Spin up, streaming rpm, and report the reached speed."""
         for step in (0.25, 0.5, 0.75, 1.0):
             self.rpm.publish(target_rpm * step)

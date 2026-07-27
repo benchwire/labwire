@@ -1,6 +1,7 @@
 """Tests for v0.2: mandatory UCUM units and S0-S3 safety classes (SPEC §7, §8.6)."""
 
 from collections.abc import AsyncIterator
+from typing import TypedDict
 
 import pytest
 from labwire.core import (
@@ -18,6 +19,7 @@ from labwire.core import (
     command,
     interlock,
 )
+from pydantic import ConfigDict
 
 GRANT = "operator-grant-under-test"
 
@@ -29,6 +31,46 @@ _IDENTITY = IdentityInfo(
 )
 
 
+class ReadResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    read_ml: float
+
+
+class ConsumeResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    consumed_ml: float
+
+
+class IrradiateResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    delivered_j: float
+
+
+class PressureResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    pressure: float
+
+
+class RatioResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    ratio: float
+
+
 class SafetyRig(Instrument):
     """One command per safety class, plus a recovery path."""
 
@@ -37,17 +79,17 @@ class SafetyRig(Instrument):
     spill = interlock("spill", description="Vessel overflowed; cleared by vent.", kind="soft")
 
     @command(returns_units={"read_ml": "mL"})
-    async def read(self, ctx: CommandContext) -> dict[str, float]:
+    async def read(self, ctx: CommandContext) -> ReadResult:
         """Read the level (routine, reversible)."""
         return {"read_ml": 1.0}
 
     @command(units={"volume_ml": "mL"}, returns_units={"consumed_ml": "mL"}, safety_class="S2")
-    async def consume(self, ctx: CommandContext, volume_ml: float) -> dict[str, float]:
+    async def consume(self, ctx: CommandContext, volume_ml: float) -> ConsumeResult:
         """Consume reagent (irreversible)."""
         return {"consumed_ml": volume_ml}
 
     @command(units={"joules": "J"}, returns_units={"delivered_j": "J"}, safety_class="S3")
-    async def irradiate(self, ctx: CommandContext, joules: float) -> dict[str, float]:
+    async def irradiate(self, ctx: CommandContext, joules: float) -> IrradiateResult:
         """Fire the laser (hazardous)."""
         return {"delivered_j": joules}
 
@@ -100,7 +142,7 @@ def _declare_unitless_result() -> type[Instrument]:
         identity = _IDENTITY
 
         @command()
-        async def read_pressure(self, ctx: CommandContext) -> dict[str, float]:
+        async def read_pressure(self, ctx: CommandContext) -> PressureResult:
             """Return a number with no declared result unit."""
             return {"pressure": 1.0}
 
@@ -135,7 +177,7 @@ def test_dimensionless_unity_code_satisfies_the_requirement() -> None:
         identity = _IDENTITY
 
         @command(units={"ratio": "1"}, returns_units={"ratio": "1"})
-        async def set_ratio(self, ctx: CommandContext, ratio: float) -> dict[str, float]:
+        async def set_ratio(self, ctx: CommandContext, ratio: float) -> RatioResult:
             """Set a dimensionless ratio."""
             return {"ratio": ratio}
 

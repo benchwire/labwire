@@ -52,8 +52,6 @@ def _declare(annotation: Any, units: dict[str, str] | None = None) -> None:
         (list[float] | None, "an optional array"),
         (list[list[float]], "a nested array"),
         (tuple[float, float], "a fixed-length tuple"),
-        (dict[str, float], "a mapping of floats"),
-        (list[dict[str, float]], "an array of mappings"),
     ],
 )
 def test_a_quantity_without_a_unit_is_refused_at_declaration(annotation: Any, label: str) -> None:
@@ -76,6 +74,20 @@ def test_the_same_declaration_is_accepted_once_annotated(annotation: Any) -> Non
 )
 def test_things_that_are_not_quantities_need_no_unit(annotation: Any) -> None:
     _declare(annotation)  # does not raise
+
+
+@pytest.mark.parametrize("annotation", [dict[str, float], list[dict[str, float]]])
+def test_a_mapping_of_quantities_is_refused_however_it_is_annotated(annotation: Any) -> None:
+    """One code cannot describe quantities under names the schema never states.
+
+    The named form of the same bundle is already refused with "flatten them";
+    withholding the field names must not remove the objection. Found by the
+    audit: nine of fourteen shipped driver commands used this shape.
+    """
+    with pytest.raises(TypeError, match="does not declare"):
+        _declare(annotation)
+    with pytest.raises(TypeError, match="does not declare"):
+        _declare(annotation, {"quantity": "Cel"})  # a plausible code does not help
 
 
 def test_the_error_says_a_unit_is_needed_inside_a_list_too() -> None:

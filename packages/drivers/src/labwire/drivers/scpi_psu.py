@@ -10,6 +10,7 @@ Example:
 """
 
 import contextlib
+from typing import TypedDict
 
 from labwire.core import (
     CommandContext,
@@ -23,10 +24,52 @@ from labwire.core import (
     interlock,
 )
 from labwire.drivers._lineproto import LineProtocolClient
+from pydantic import ConfigDict
 
 _POLL_S = 0.03
 _SETTLE_TOLERANCE = 0.02
 _SETTLE_TIMEOUT_S = 5.0
+
+
+class VoltsResult(TypedDict):
+    """The voltage setpoint actually reached."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    volts: float
+
+
+class AmpsResult(TypedDict):
+    """The current limit actually set."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    amps: float
+
+
+class OutputResult(TypedDict):
+    """Whether the output is now enabled."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    on: float
+
+
+class MeasureResult(TypedDict):
+    """One measurement of output voltage and current."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    volts: float
+    amps: float
+
+
+class LoadResult(TypedDict):
+    """The simulated load resistance now applied."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    ohms: float
 
 
 class PowerSupply(Instrument):
@@ -98,7 +141,7 @@ class PowerSupply(Instrument):
         qudt_quantity_kind={"volts": "Voltage"},
         estimated_duration_s=2.0,
     )
-    async def set_voltage(self, ctx: CommandContext, volts: float) -> dict[str, float]:
+    async def set_voltage(self, ctx: CommandContext, volts: float) -> VoltsResult:
         """Set the voltage setpoint and wait for the output to settle.
 
         Example:
@@ -120,7 +163,7 @@ class PowerSupply(Instrument):
         raise DeviceTimeoutError(f"output did not settle to {volts} V")
 
     @command(units={"amps": "A"}, returns_units={"amps": "A"})
-    async def set_current_limit(self, ctx: CommandContext, amps: float) -> dict[str, float]:
+    async def set_current_limit(self, ctx: CommandContext, amps: float) -> AmpsResult:
         """Set the current limit (constant-current threshold).
 
         Example:
@@ -130,7 +173,7 @@ class PowerSupply(Instrument):
         return {"amps": amps}
 
     @command(returns_units={"on": "1"})
-    async def output(self, ctx: CommandContext, on: bool) -> dict[str, float]:
+    async def output(self, ctx: CommandContext, on: bool) -> OutputResult:
         """Enable or disable the output.
 
         Example:
@@ -140,7 +183,7 @@ class PowerSupply(Instrument):
         return {"on": float(int(on))}
 
     @command(returns_units={"volts": "V", "amps": "A"})
-    async def measure(self, ctx: CommandContext) -> dict[str, float]:
+    async def measure(self, ctx: CommandContext) -> MeasureResult:
         """Measure output voltage and current.
 
         Example:
@@ -162,7 +205,7 @@ class PowerSupply(Instrument):
         return {"cleared": True}
 
     @command(name="x-sim/set_load", units={"ohms": "Ohm"}, returns_units={"ohms": "Ohm"})
-    async def set_load(self, ctx: CommandContext, ohms: float) -> dict[str, float]:
+    async def set_load(self, ctx: CommandContext, ohms: float) -> LoadResult:
         """Connect a resistive load (simulation-only vendor extension).
 
         Example:

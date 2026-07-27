@@ -434,7 +434,10 @@ def command[**P, R](
         params_schema.pop("title", None)
         returns_schema: dict[str, Any] | None = None
         if sig.return_annotation not in (inspect.Signature.empty, None, Any):
-            returns_schema = TypeAdapter(sig.return_annotation).json_schema()
+            # Serialization mode, not validation mode: a @computed_field is
+            # omitted from the validation schema by design but is serialized
+            # onto the wire, so the validation schema understates the result.
+            returns_schema = TypeAdapter(sig.return_annotation).json_schema(mode="serialization")
         resolved_description = description or inspect.getdoc(fn) or ""
         if not resolved_description:
             raise TypeError(

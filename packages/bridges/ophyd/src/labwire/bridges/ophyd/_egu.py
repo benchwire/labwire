@@ -17,6 +17,8 @@ Example:
     'um'
     >>> egu_to_ucum("furlongs per fortnight") is None
     True
+    >>> egu_to_ucum("A") is None  # amperes or angstroms; the PV does not say
+    True
 """
 
 # Keys are compared case-sensitively first, then case-insensitively, because
@@ -32,8 +34,8 @@ _EGU_TO_UCUM: dict[str, str] = {
     "micron": "um",
     "microns": "um",
     "nm": "nm",
-    "A": "Ao",  # ångström: UCUM 'Ao'
-    "angstrom": "Ao",
+    "angstrom": "Ao",  # UCUM 'Ao'
+    "Angstroms": "Ao",
     "Å": "Ao",
     # angle
     "deg": "deg",
@@ -118,6 +120,25 @@ _EGU_TO_UCUM: dict[str, str] = {
 _EMPTY_EGU = {"", "none", "n/a", "na", "-", "unitless"}
 
 
+_AMBIGUOUS_EGU: frozenset[str] = frozenset(
+    {
+        # A beamline writes "A" for amperes on a magnet supply and for
+        # angstroms on a monochromator, and the PV does not say which. An
+        # earlier version of this table silently chose angstrom, so a magnet
+        # current introspected as a length with nothing reported. Refusing is
+        # the only honest answer: the annotation file names the code.
+        "A",
+        # "S" is siemens or seconds; "G" is gauss or grams; "H" is henry or
+        # hours; "M" is molar or metres. Same problem, same answer.
+        "S",
+        "G",
+        "H",
+        "M",
+    }
+)
+"""EGU strings whose meaning cannot be decided from the string alone."""
+
+
 def egu_to_ucum(egu: str | None) -> str | None:
     """Translate an EPICS EGU string to a UCUM code, or None if unresolved.
 
@@ -132,6 +153,8 @@ def egu_to_ucum(egu: str | None) -> str | None:
     trimmed = egu.strip()
     if trimmed.lower() in _EMPTY_EGU:
         return None
+    if trimmed in _AMBIGUOUS_EGU:
+        return None  # a human decides; see _AMBIGUOUS_EGU
     if trimmed in _EGU_TO_UCUM:
         return _EGU_TO_UCUM[trimmed]
     lowered = trimmed.lower()

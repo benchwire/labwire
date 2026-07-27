@@ -1,7 +1,18 @@
 """Tests for Instrument declaration: @command, channel(), interlock()."""
 
+from typing import TypedDict
+
 from labwire.core.capabilities import IdentityInfo
 from labwire.core.server import CommandContext, Instrument, channel, command, interlock
+from pydantic import ConfigDict
+
+
+class Dispensed(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    dispensed_ul: float
 
 
 class Pump(Instrument):
@@ -28,7 +39,7 @@ class Pump(Instrument):
     )
     async def dispense(
         self, ctx: CommandContext, volume_ul: float, rate_ul_min: float = 100.0
-    ) -> dict[str, float]:
+    ) -> Dispensed:
         """Dispense a volume of liquid at a controlled flow rate."""
         return {"dispensed_ul": volume_ul}
 

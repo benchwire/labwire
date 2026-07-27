@@ -241,13 +241,14 @@ silently covers the most dangerous class is the wrong default.
 
 **Severity: small, and the cheapest fix here. RESOLVED in 0.2.1.**
 
-> **Resolved 2026-07-27, in two passes.** The first pass covered arrays and
+> **Resolved 2026-07-27, in three passes.** The first pass covered arrays and
 > was wrong to be confident: an adversarial audit of it, run before the claim
 > went out, found the guarantee still false in three structural ways and
 > demonstrated a live leak in this repository's own PyLabRobot bridge. The
-> second pass rewrote the checker. What changed, and what the audit found, is
-> at the end of this section. The finding is kept because findings are
-> history, not a task list.
+> second pass rewrote the checker, and a second audit of *that* found the
+> walker sound but four holes downstream of it. The third pass closed those.
+> What changed, and what each audit found, is at the end of this section. The
+> finding is kept because findings are history, not a task list.
 
 Confirmed by running it, not by reading the code:
 
@@ -331,6 +332,41 @@ record, and the signed manifest carry identical bytes.
 Telemetry needed no change, and the reason is recorded as a test rather than a
 claim: `ChannelSpec` has always required a non-empty unit for every channel
 regardless of dtype, and v0.2 channel dtypes are scalar only.
+
+**The second audit, and the third pass.** The rewritten walker was audited
+again. It held: three auditors could not fool it into missing a numeric path,
+and its fail-closed handling survived `$anchor`, `$id` re-basing, remote and
+unresolvable references, typeless-but-formatted nodes, and depth-bombed
+combinators. Every surviving hole was *downstream* of it, which is its own
+lesson: a correct analysis can still be discarded by the code that consumes
+it.
+
+1. **A container at the root exempted everything inside it.** The coverage
+   check asked whether a path named a field, and a path beginning with a
+   container marker (`[].volume_ul`) had an empty head, so it was treated as
+   anonymous and satisfied by any key at all. `list[WellReading]` was accepted
+   with `returns_units={"zzz": "1"}` while the identical
+   `Plate{wells: list[WellReading]}` was correctly refused. Deleting a wrapper
+   model must not switch the check off.
+2. **An open mapping of numbers admitted unlimited quantities under one
+   code.** `dict[str, float]` declares arbitrarily many quantities of
+   arbitrarily many dimensions, and the checker asked only for one code. The
+   named form of the same bundle was already refused with "flatten them";
+   withholding the field names removed the objection. This was the repository's
+   dominant shape: nine of fourteen shipped driver commands, the quickstart,
+   and every generated ophyd command. It is now refused, and every one of them
+   returns a declared model.
+3. **`@computed_field` reached the wire but not the schema.** The result schema
+   was built in pydantic's validation mode, which omits computed fields by
+   design, while serialization emits them. A derived quantity (`net = gross
+   minus tare`) travelled with no code. The schema is now built in
+   serialization mode.
+4. **The EGU table guessed.** `egu_to_ucum("A")` returned `"Ao"`, angstrom, for
+   what is far more often amperes on a beamline, and because translation
+   succeeded no gap was reported to anyone. `A`, `S`, `G`, `H` and `M` are
+   genuinely ambiguous and now refuse to translate, so the annotation file has
+   to say. This one is unit *correctness* rather than unit presence, and it
+   failed silently where a missing unit fails loudly.
 
 **What is still not covered, honestly.** The guarantee is about *declared
 schemas*. It does not reach event payloads, progress messages, or the values a

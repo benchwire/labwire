@@ -11,6 +11,7 @@ run record.
 """
 
 import asyncio
+from typing import TypedDict
 
 from labwire.core import (
     CommandContext,
@@ -23,6 +24,15 @@ from labwire.core import (
     channel,
     command,
 )
+from pydantic import ConfigDict
+
+
+class MassReading(TypedDict):
+    """One settled mass reading."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    mass_g: float
 
 
 class SimBalance(Instrument):
@@ -42,7 +52,7 @@ class SimBalance(Instrument):
         returns_units={"mass_g": "g"},
         estimated_duration_s=2.0,
     )
-    async def measure(self, ctx: CommandContext, settle_s: float = 0.5) -> dict[str, float]:
+    async def measure(self, ctx: CommandContext, settle_s: float = 0.5) -> MassReading:
         """Let the reading stabilize, streaming samples, then report the mass."""
         reading = 0.0
         for step in range(1, 6):

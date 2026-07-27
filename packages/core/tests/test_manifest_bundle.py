@@ -5,6 +5,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 from labwire.core import (
@@ -19,6 +20,15 @@ from labwire.core import (
     command,
 )
 from labwire.core.signing import Manifest, verify_bundle, verify_manifest
+from pydantic import ConfigDict
+
+
+class HeatResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    reached_c: float
 
 
 class Reactor(Instrument):
@@ -34,7 +44,7 @@ class Reactor(Instrument):
     temperature = channel("temperature", unit="Cel", description="Vessel temperature.")
 
     @command(units={"target_c": "Cel"}, returns_units={"reached_c": "Cel"})
-    async def heat(self, ctx: CommandContext, target_c: float) -> dict[str, float]:
+    async def heat(self, ctx: CommandContext, target_c: float) -> HeatResult:
         """Ramp to a target temperature, streaming readings."""
         for step in (0.5, 0.9, 1.0):
             self.temperature.publish(target_c * step)

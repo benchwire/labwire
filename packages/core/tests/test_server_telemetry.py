@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 from labwire.core.capabilities import IdentityInfo
@@ -19,6 +19,15 @@ from labwire.core.server import (
 )
 from labwire.core.session import JsonRpcSession
 from labwire.core.transport import MemoryTransport
+from pydantic import ConfigDict
+
+
+class Measurement(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    mass_g: float
 
 
 class Balance(Instrument):
@@ -39,7 +48,7 @@ class Balance(Instrument):
         self.proceed = asyncio.Event()
 
     @command(units={"samples": "1"}, returns_units={"mass_g": "g"})
-    async def measure(self, ctx: CommandContext, samples: int = 3) -> dict[str, float]:
+    async def measure(self, ctx: CommandContext, samples: int = 3) -> Measurement:
         """Stream ``samples`` mass readings, then report the last one."""
         reading = 0.0
         for i in range(samples):

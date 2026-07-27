@@ -41,6 +41,26 @@ Protocol version stays `"0.2"`: no message shape changed.
 - **`returns_units` is keyed by path**, so a result that is legitimately a
   tree can be annotated: `labware[].grid.item_max_volume_ul` names a quantity
   three levels down, and a key covers every path beneath it.
+- **An open mapping of numbers (`dict[str, float]`) is refused.** It declares
+  arbitrarily many quantities of arbitrarily many dimensions and can carry only
+  one code, which is the objection the nested-object rule already made;
+  withholding the field names must not remove it. Every affected command now
+  returns a declared model: the three drivers, the quickstart, and the ophyd
+  bridge, whose `read` and `trigger` models are built from the resolved
+  channel set so its correctness-by-discipline became correctness by
+  construction.
+- **Result schemas are generated in serialization mode**, so a pydantic
+  `@computed_field`, which reaches the wire but is absent from the validation
+  schema, can no longer carry an unannotated quantity.
+- **A quantity inside a root-level container is annotated like any other.** A
+  path such as `[].volume_ul` was treated as anonymous and satisfied by any
+  key, so `list[Reading]` escaped while `Plate{wells: list[Reading]}` was
+  refused. Deleting a wrapper model no longer switches the check off.
+- **`labwire-ophyd` no longer guesses an ambiguous EPICS unit.** `egu_to_ucum`
+  mapped bare `A` to `Ao` (angstrom), so a magnet current PV introspected as a
+  length with nothing reported to anyone. `A`, `S`, `G`, `H` and `M` now refuse
+  to translate and are reported as unresolved, for the annotation file to
+  settle.
 - **`labwire-pylabrobot` commands return declared models** rather than
   `dict[str, Any]`. The old opaque return meant `describe_deck` shipped
   `location_mm` in millimetres and `item_max_volume_ul` in microlitres with no

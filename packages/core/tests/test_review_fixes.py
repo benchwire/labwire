@@ -3,7 +3,7 @@
 import asyncio
 import math
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, TypedDict
 
 import pytest
 from labwire.core.capabilities import IdentityInfo
@@ -25,6 +25,15 @@ from labwire.core.server import (
 )
 from labwire.core.session import JsonRpcSession, SessionClosed
 from labwire.core.transport import MemoryTransport
+from pydantic import ConfigDict
+
+
+class DoseResult(TypedDict):
+    """A closed result schema for this test instrument."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]
+
+    dosed_ul: float
 
 
 class Doser(Instrument):
@@ -51,7 +60,7 @@ class Doser(Instrument):
         self.started_background = True
 
     @command(units={"volume_ul": "uL"}, returns_units={"dosed_ul": "uL"})
-    async def dose(self, ctx: CommandContext, volume_ul: float = 1.0) -> dict[str, float]:
+    async def dose(self, ctx: CommandContext, volume_ul: float = 1.0) -> DoseResult:
         """Dose a volume."""
         return {"dosed_ul": volume_ul}
 

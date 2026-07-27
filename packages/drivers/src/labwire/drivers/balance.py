@@ -11,6 +11,7 @@ Example:
 """
 
 import contextlib
+from typing import TypedDict
 
 from labwire.core import (
     CommandContext,
@@ -24,8 +25,33 @@ from labwire.core import (
     interlock,
 )
 from labwire.drivers._lineproto import LineProtocolClient
+from pydantic import ConfigDict
 
 _POLL_S = 0.03
+
+
+class MassResult(TypedDict):
+    """One settled mass reading."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    mass_g: float
+
+
+class TareResult(TypedDict):
+    """The tare offset the balance recorded."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    tare_g: float
+
+
+class LoadResult(TypedDict):
+    """The simulated mass now on the pan."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    loaded_g: float
 
 
 class Balance(Instrument):
@@ -95,9 +121,7 @@ class Balance(Instrument):
         returns_units={"mass_g": "g"},
         estimated_duration_s=5.0,
     )
-    async def measure(
-        self, ctx: CommandContext, settle_timeout_s: float = 10.0
-    ) -> dict[str, float]:
+    async def measure(self, ctx: CommandContext, settle_timeout_s: float = 10.0) -> MassResult:
         """Wait for a stable reading and report it; emits ``measurement/stable``.
 
         Example:
@@ -114,7 +138,7 @@ class Balance(Instrument):
         raise DeviceTimeoutError(f"no stable reading within {settle_timeout_s} s")
 
     @command(units={"settle_timeout_s": "s"}, returns_units={"tare_g": "g"})
-    async def tare(self, ctx: CommandContext, settle_timeout_s: float = 10.0) -> dict[str, float]:
+    async def tare(self, ctx: CommandContext, settle_timeout_s: float = 10.0) -> TareResult:
         """Tare the balance, waiting for the pan to stabilize first.
 
         Example:
@@ -138,7 +162,7 @@ class Balance(Instrument):
         clears_interlocks=["overload"],
         safety_class="S0",  # simulation control and the overload recovery path
     )
-    async def load(self, ctx: CommandContext, mass_g: float) -> dict[str, float]:
+    async def load(self, ctx: CommandContext, mass_g: float) -> LoadResult:
         """Place a mass on the pan (simulation-only vendor extension).
 
         Declared with ``clears_interlocks`` because removing excess mass is

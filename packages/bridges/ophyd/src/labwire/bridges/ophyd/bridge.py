@@ -40,6 +40,7 @@ from labwire.core import (
     channel,
     command,
 )
+from pydantic import BaseModel, ConfigDict, create_model
 
 _POLL_S = 0.05
 _STATUS_TIMEOUT_S = 300.0
@@ -231,6 +232,7 @@ def _make_setter(
     """Build a typed ``set_<attr>`` coroutine the @command decorator accepts."""
     python_type = _PYTHON_TYPES[resolved_component.dtype]
     attr = resolved_component.attr
+    result_model = _value_model(f"set_{attr}", python_type)
 
     async def setter(self: OphydBridgeBase, ctx: CommandContext, value: Any) -> dict[str, Any]:
         return await self._set_component(ctx, attr, value)  # pyright: ignore[reportPrivateUsage]
@@ -238,7 +240,7 @@ def _make_setter(
     setter.__name__ = f"set_{attr}"
     setter.__qualname__ = setter.__name__
     setter.__doc__ = description
-    setter.__annotations__ = {"value": python_type, "return": dict[str, float]}
+    setter.__annotations__ = {"value": python_type, "return": result_model}
     setter.__signature__ = inspect.Signature(  # pyright: ignore[reportFunctionMemberAccess]
         [
             inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD),
@@ -247,7 +249,7 @@ def _make_setter(
                 "value", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=python_type
             ),
         ],
-        return_annotation=dict[str, float],
+        return_annotation=result_model,
     )
     return command(
         units=units,
@@ -266,6 +268,7 @@ def _make_mover(
     """Build the positioner ``move`` coroutine."""
     python_type = _PYTHON_TYPES[resolved_component.dtype]
     key = resolved_component.key
+    result_model = _value_model("move", python_type)
 
     async def move(self: OphydBridgeBase, ctx: CommandContext, value: Any) -> dict[str, Any]:
         return await self._move(ctx, key, value)  # pyright: ignore[reportPrivateUsage]
@@ -273,7 +276,7 @@ def _make_mover(
     move.__name__ = "move"
     move.__qualname__ = "move"
     move.__doc__ = description
-    move.__annotations__ = {"value": python_type, "return": dict[str, float]}
+    move.__annotations__ = {"value": python_type, "return": result_model}
     move.__signature__ = inspect.Signature(  # pyright: ignore[reportFunctionMemberAccess]
         [
             inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD),
@@ -282,7 +285,7 @@ def _make_mover(
                 "value", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=python_type
             ),
         ],
-        return_annotation=dict[str, float],
+        return_annotation=result_model,
     )
     return command(
         units=units,
@@ -290,6 +293,61 @@ def _make_mover(
         safety_class=cast("Any", safety_class),
         description=description,
     )(move)
+
+
+def _declare_result(fn: Any, model: type[BaseModel]) -> None:
+    """Point a generated coroutine's declared result at a model built at runtime.
+
+    The model does not exist until the device has been introspected, so it
+    cannot be written as an annotation; the decorator reads the signature, so
+    both the annotation and the signature are replaced.
+
+    Example:
+        >>> # _declare_result(read, readings_model)
+    """
+    fn.__annotations__["return"] = model
+    fn.__signature__ = inspect.Signature(
+        [
+            inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+            inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD),
+        ],
+        return_annotation=model,
+    )
+
+
+def _value_model(name: str, python_type: type) -> type[BaseModel]:
+    """A closed one-field result model for an actuation command.
+
+    ``move`` and ``set_<attr>`` report where the device landed. Declaring that
+    as ``dict[str, float]`` would be an open mapping of quantities; one named
+    field says the same thing and can be annotated.
+
+    Example:
+        >>> # _value_model("Ophyd_SynAxis_move", float)
+    """
+    return create_model(
+        f"{name}_value", __config__=ConfigDict(extra="forbid"), value=(python_type, ...)
+    )
+
+
+def _readings_model(name: str, components: list[ResolvedComponent]) -> type[BaseModel]:
+    """A closed result model naming exactly the channels this device reads.
+
+    ``read`` and ``trigger`` return a value per exposed channel, and the
+    channel set is known once the device has been introspected. Declaring it
+    as ``dict[str, float]`` would be an open mapping of quantities under names
+    the schema never states, which one unit code cannot describe, so the model
+    is built from the resolved components instead. The bridge already filtered
+    its readings to the declared channels; this makes that discipline part of
+    the contract rather than a property of the code.
+
+    Example:
+        >>> # _readings_model("Ophyd_SynAxis", resolved.components)
+    """
+    fields: dict[str, Any] = {
+        component.key: (_PYTHON_TYPES[component.dtype], ...) for component in components
+    }
+    return create_model(f"{name}_readings", __config__=ConfigDict(extra="forbid"), **fields)
 
 
 def OphydInstrument(
@@ -329,6 +387,8 @@ def OphydInstrument(
             qudt_quantity_kind=component.qudt_quantity_kind,
         )
 
+    readable = [c for c in resolved.components if c.role is ComponentRole.CHANNEL]
+    readings_model = _readings_model(f"Ophyd_{resolved.identity.model}", readable)
     by_key = {component.key: component for component in resolved.components}
     for spec in resolved.commands:
         if spec.name == "move" and spec.component_key:
@@ -343,10 +403,11 @@ def OphydInstrument(
             )
         elif spec.name == "trigger":
 
-            async def trigger(self: OphydBridgeBase, ctx: CommandContext) -> dict[str, float]:
+            async def trigger(self: OphydBridgeBase, ctx: CommandContext) -> Any:
                 return await self._trigger(ctx)  # pyright: ignore[reportPrivateUsage]
 
             trigger.__doc__ = spec.description
+            _declare_result(trigger, readings_model)
             namespace["trigger"] = command(
                 returns_units=dict(channel_units),
                 safety_class=cast("Any", spec.safety_class),
@@ -363,10 +424,11 @@ def OphydInstrument(
             )(stop)
         elif spec.name == "read":
 
-            async def read(self: OphydBridgeBase, ctx: CommandContext) -> dict[str, float]:
+            async def read(self: OphydBridgeBase, ctx: CommandContext) -> Any:
                 return await self._read_device()  # pyright: ignore[reportPrivateUsage]
 
             read.__doc__ = spec.description
+            _declare_result(read, readings_model)
             namespace["read"] = command(
                 returns_units=dict(channel_units),
                 safety_class=cast("Any", spec.safety_class),

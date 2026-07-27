@@ -276,7 +276,15 @@ def _top_level(path: str) -> str:
 
 
 def _is_named(path: str) -> bool:
-    return bool(_top_level(path))
+    """Whether a path names a field, so a matching code can be demanded.
+
+    A path beginning with a container marker still names one: ``[].volume_ul``
+    is a volume just as much as ``readings[].volume_ul`` is, and an earlier
+    version exempted the first because its head was empty. Deleting a wrapper
+    model must not switch the check off. Only a genuinely anonymous quantity,
+    such as a bare number or an array of them, has no field to match.
+    """
+    return "." in path or bool(_top_level(path))
 
 
 def _covered(path: str, keys: set[str]) -> bool:
@@ -386,6 +394,21 @@ class CommandSpec(_SpecModel):
                 f"{'is' if len(where) == 1 else 'are'} at {where}, so a quantity could travel "
                 "there unannotated. Declare a concrete type; an open mapping, an untyped "
                 "value, or a reference this build cannot resolve cannot be checked"
+            )
+
+        # A mapping of numbers is a declaration of arbitrarily many quantities
+        # under names the schema never states, so one code cannot describe
+        # them. This is the same objection the nested-object rule makes;
+        # withholding the field names must not remove it.
+        unnamed_mapping = sorted(path for path in scan.numeric if "{}" in path)
+        if unnamed_mapping:
+            where = [
+                path.replace("{}", "{any key}") or "the whole value" for path in unnamed_mapping
+            ]
+            raise ValueError(
+                f"command {self.name!r}: {where} are quantities under names the {label} schema "
+                "does not declare, and one unit code cannot describe quantities of different "
+                "kinds. Declare a model with named fields, one unit code each"
             )
 
         nested = sorted(path for path in scan.numeric if "." in path)

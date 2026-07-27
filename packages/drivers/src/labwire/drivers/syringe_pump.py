@@ -9,6 +9,8 @@ Example:
     >>> # server = InstrumentServer(SyringePump("127.0.0.1", 4001))
 """
 
+from typing import TypedDict
+
 from labwire.core import (
     CanceledError,
     CommandContext,
@@ -22,8 +24,17 @@ from labwire.core import (
     interlock,
 )
 from labwire.drivers._lineproto import LineProtocolClient
+from pydantic import ConfigDict
 
 _POLL_S = 0.02
+
+
+class DispenseResult(TypedDict):
+    """How much liquid was actually dispensed."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")  # pyright: ignore[reportGeneralTypeIssues]  # a closed result schema
+
+    dispensed_ul: float
 
 
 class SyringePump(Instrument):
@@ -97,7 +108,7 @@ class SyringePump(Instrument):
     )
     async def dispense(
         self, ctx: CommandContext, volume_ul: float, rate_ul_min: float
-    ) -> dict[str, float]:
+    ) -> DispenseResult:
         """Dispense a volume at a controlled flow rate, streaming progress.
 
         Example:
