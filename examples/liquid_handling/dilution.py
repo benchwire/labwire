@@ -64,9 +64,55 @@ async def show_deck(rig: DilutionRig, heading: str) -> dict[str, Any]:
     return state
 
 
+async def cancel_a_transfer_at_a_boundary(rig: "DilutionRig") -> None:
+    """Cancel a transfer mid-flight and let the record tell the truth.
+
+    transfer is the one command this bridge sequences itself, so it
+    declares cancel_semantics "between_steps" (SPEC 8.3): the in-flight
+    PLR call finishes, the next is never issued, and the settlement names
+    the boundary. The aspirated liquid is in the tip, and the deck
+    resource says so; nothing pretends the cancel undid anything.
+    """
+    import asyncio as _asyncio
+
+    print("\ncancelling a transfer mid-flight (S2, cancel between steps)")
+    await rig.call("set_well_volume", {"well": "labwire:deck/source_plate/B1", "volume_ul": 200.0})
+    await rig.call("pick_up_tips", {"tip_spots": ["labwire:deck/tips/H12"]})
+    handle = await rig.client.submit(
+        "transfer",
+        {
+            "source": "labwire:deck/source_plate/B1",
+            "targets": ["labwire:deck/dilution_plate/B1", "labwire:deck/dilution_plate/B2"],
+            "volumes_ul": [40.0, 40.0],
+        },
+        confirmation=STANDING_GRANT,
+    )
+    await _asyncio.sleep(0.05)  # let the aspirate step start
+    accepted = await handle.cancel()
+    print(f"  cancel accepted: {accepted.status} (acknowledgment is not settlement)")
+    while True:
+        status = await handle.status()
+        if status.status in ("succeeded", "failed", "canceled"):
+            break
+        await _asyncio.sleep(0.02)
+    block = status.cancellation
+    assert block is not None
+    if block.boundary is not None:
+        print(
+            f"  settled: {status.status}, {block.outcome} after "
+            f"{block.boundary.last!r} ({block.boundary.completed_steps}/"
+            f"{block.boundary.of_steps} steps)"
+        )
+        print("  the aspirated liquid is in the tip: the deck shows the source's deficit")
+    else:
+        print(f"  settled: {status.status}, {block.outcome} (the steps outran the cancel)")
+    await rig.call("discard_tips", {})
+
+
 async def main() -> None:
     """Run the dilution series and verify the signed evidence."""
     steps = demo_steps()
+    os.environ.setdefault("DEMO_OP_DELAY", "0.1")  # honest pacing; see rig._paced
     runs = Path(os.environ.get("DEMO_RUNS_DIR", "demo_runs_pylabrobot"))
 
     print("labwire pylabrobot bridge demo: two-fold serial dilution")
@@ -120,6 +166,8 @@ async def main() -> None:
 
         mounted = sum(1 for channel in state["channels"] if channel["has_tip"])
         print(f"\n    channels holding a tip: {mounted} (every tip was discarded)")
+
+        await cancel_a_transfer_at_a_boundary(rig)
 
         move_run = await gripper_act(rig)
 

@@ -49,7 +49,9 @@ def test_streaming_example_runs_clean(tmp_path: Path) -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
-    assert "canceled cleanly" in proc.stdout
+    assert "settled: halted (pump reports IDLE after STP" in proc.stdout
+    assert "declares cancel_semantics 'none'" in proc.stdout
+    assert "the slew finished anyway, honestly" in proc.stdout
     assert "after recovery" in proc.stdout
     assert "done" in proc.stdout
 

@@ -89,6 +89,28 @@ _SAFETY_NOTES = {
 }
 
 
+_CANCEL_NOTES: dict[str, str] = {
+    # SPEC 8.3: agents plan around irreversibility, so each tool says what
+    # cancel can physically do BEFORE the agent commits to calling it.
+    "none": (
+        "Cancel: none. Once started this runs to completion; the operation "
+        "is committed to the device and a cancel request will be refused. "
+        "Decide before calling, not after."
+    ),
+    "between_steps": (
+        "Cancel: between steps only. A cancel finishes the step in flight "
+        "and stops at the next boundary; the record names the boundary "
+        "reached, and partial physical effects (such as liquid already "
+        "aspirated) remain."
+    ),
+    "abort": (
+        "Cancel: abort. The backend has a real halt path; a cancelled run's "
+        "record states whether the halt was confirmed, and 'unconfirmed' "
+        "means the physical state must be treated as unknown."
+    ),
+}
+
+
 def _tool_description(instrument: ConnectedInstrument, spec: CommandSpec) -> str:
     identity = instrument.descriptor.identity
     parts = [spec.description.strip()]
@@ -99,6 +121,7 @@ def _tool_description(instrument: ConnectedInstrument, spec: CommandSpec) -> str
         results = ", ".join(f"{k} in {v}" for k, v in spec.returns_units.items())
         parts.append(f"Result units (UCUM): {results}.")
     parts.append(_SAFETY_NOTES.get(spec.safety_class, ""))
+    parts.append(_CANCEL_NOTES[spec.cancel_semantics])
     parts.append(
         f"Instrument: {identity.manufacturer} {identity.model} "
         f"(SN {identity.serial_number}); Labwire command {spec.name!r}."

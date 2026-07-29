@@ -35,6 +35,46 @@ DILUENT_VOLUME_UL = 100.0
 STEP_VOLUME_UL = 100.0
 
 
+def _paced(
+    backend: LiquidHandlerChatterboxBackend, delay_s: float
+) -> LiquidHandlerChatterboxBackend:
+    """Give each simulated operation a small real duration.
+
+    The chatterbox completes instantly, which makes demo output an
+    unreadable burst and makes a mid-run cancel impossible to demonstrate.
+    A bounded delay per operation restores honest pacing without touching
+    behavior. Opt-in via DEMO_OP_DELAY seconds; off by default.
+    """
+    import asyncio as _asyncio
+    from collections.abc import Awaitable, Callable
+    from typing import Any
+
+    for name in (
+        "pick_up_tips",
+        "drop_tips",
+        "aspirate",
+        "dispense",
+        "pick_up_resource",
+        "move_picked_up_resource",
+        "drop_resource",
+    ):
+        original = getattr(backend, name, None)
+        if original is None:
+            continue
+
+        def paced(
+            *args: Any, _fn: Callable[..., Awaitable[Any]] = original, **kwargs: Any
+        ) -> Awaitable[Any]:
+            async def run() -> Any:
+                await _asyncio.sleep(delay_s)
+                return await _fn(*args, **kwargs)
+
+            return run()
+
+        setattr(backend, name, paced)
+    return backend
+
+
 def _quiet(backend: LiquidHandlerChatterboxBackend) -> LiquidHandlerChatterboxBackend:
     """Silence the chatterbox backend's operation tables.
 
@@ -96,6 +136,8 @@ async def build_liquid_handler() -> LiquidHandler:
     backend = LiquidHandlerChatterboxBackend(num_channels=CHANNELS)
     if os.environ.get("DEMO_QUIET") == "1":
         backend = _quiet(backend)
+    if (pace := float(os.environ.get("DEMO_OP_DELAY", "0") or 0)) > 0:
+        backend = _paced(backend, pace)
     handler = LiquidHandler(backend=backend, deck=deck)
     await handler.setup()
     deck.assign_child_resource(hamilton_96_tiprack_1000uL_filter(name="tips"), rails=1)
