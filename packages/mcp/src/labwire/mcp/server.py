@@ -13,17 +13,37 @@ Example:
 
 import json
 import re
+import secrets
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from labwire.core import CommandSpec, InstrumentDescriptor, LabwireClient, LabwireError
-from pydantic import AnyUrl
 
-from mcp.server.lowlevel import Server
-from mcp.types import Resource, TextContent, Tool, ToolAnnotations
+from mcp import MCPError
+from mcp.server import CacheHint, Server, ServerRequestContext
+from mcp.types import (
+    INVALID_PARAMS,
+    CallToolRequestParams,
+    CallToolResult,
+    ElicitRequest,
+    ElicitRequestFormParams,
+    InputRequiredResult,
+    ListResourcesResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    ReadResourceRequestParams,
+    ReadResourceResult,
+    Resource,
+    TextContent,
+    TextResourceContents,
+    Tool,
+    ToolAnnotations,
+)
 
 _DEFAULT_TIMEOUT_S = 300.0
+_LEGACY_ERA_PREFIX = "202" + "5"  # protocol versions 2025-* and earlier use the handshake era
+_MODERN_ERA = "2026-07-28"
 
 
 def _sanitize(name: str) -> str:
@@ -183,29 +203,64 @@ def _tool_annotations(spec: CommandSpec) -> ToolAnnotations | None:
     if spec.safety_class == "S3":
         return ToolAnnotations(
             title="HAZARDOUS: operator grant required",
-            destructiveHint=True,
-            idempotentHint=False,
+            destructive_hint=True,
+            idempotent_hint=False,
         )
     if spec.safety_class == "S2":
-        return ToolAnnotations(title="Irreversible: confirmation required", destructiveHint=True)
+        return ToolAnnotations(title="Irreversible: confirmation required", destructive_hint=True)
     return None
 
 
-def build_server(instruments: list[ConnectedInstrument]) -> Server:  # pyright: ignore[reportMissingTypeArgument, reportUnknownParameterType]
+@dataclass
+class _PendingApproval:
+    """One in-flight input_required round, held in-process (SPEC 8.6 note).
+
+    The request_state travelling to the client is only a random key into
+    this table; nothing decodable leaves the process, and the stdio
+    adapter IS one process, so no sealing crypto is needed. Single-use.
+    """
+
+    tool: str
+    arguments: dict[str, Any]
+    kind: str  # "s2" or "s3"
+    request_id: str | None = None  # the S3 pending request, for the docs trail
+
+
+def _era_is_modern(ctx: ServerRequestContext[Any, Any]) -> bool:
+    return not ctx.protocol_version.startswith(_LEGACY_ERA_PREFIX)
+
+
+def build_server(
+    instruments: list[ConnectedInstrument],
+    *,
+    s2_confirmation: str | None = None,
+) -> Server[Any]:
     """Build an MCP server exposing every instrument command as a tool.
+
+    ``s2_confirmation`` is the deployment's standing S2 confirmation,
+    read from the LABWIRE_MCP_CONFIRMATION environment variable by the
+    console entry point (an environment variable, never a CLI flag, so
+    it cannot leak through process listings). When set and the client
+    speaks 2026-07-28, S2 calls become a client-surfaced approval: the
+    human sees the exact command and parameters and approves or
+    declines, and the adapter injects the confirmation only on approval.
+    Neither path identifies WHO approved; that honesty caveat is the
+    same one the signed manifests carry (identity_verified false).
 
     Example:
         >>> # server = build_server(instruments)
     """
-    server = Server("labwire")
+    pending: dict[str, _PendingApproval] = {}
 
-    @server.list_tools()
-    async def _list_tools() -> list[Tool]:  # pyright: ignore[reportUnusedFunction]
+    async def list_tools(
+        ctx: ServerRequestContext[Any, Any], params: PaginatedRequestParams | None
+    ) -> ListToolsResult:
+        del ctx, params
         tools = [
             Tool(
                 name=tool_name,
                 description=_tool_description(instrument, spec),
-                inputSchema=_tool_input_schema(spec),
+                input_schema=_tool_input_schema(spec),
                 annotations=_tool_annotations(spec),
             )
             for instrument in instruments
@@ -230,7 +285,7 @@ def build_server(instruments: list[ConnectedInstrument]) -> Server:  # pyright: 
                             f"{r.uri}: {r.description}" for r in instrument.descriptor.resources
                         )
                     ),
-                    inputSchema={
+                    input_schema={
                         "type": "object",
                         "additionalProperties": False,
                         "required": ["uri"],
@@ -241,57 +296,260 @@ def build_server(instruments: list[ConnectedInstrument]) -> Server:  # pyright: 
                             }
                         },
                     },
-                    annotations=ToolAnnotations(readOnlyHint=True),
+                    annotations=ToolAnnotations(read_only_hint=True),
                 )
             )
-        return tools
+        return ListToolsResult(tools=tools)
 
-    @server.list_resources()
-    async def _list_resources() -> list[Resource]:  # pyright: ignore[reportUnusedFunction]
+    async def list_resources(
+        ctx: ServerRequestContext[Any, Any], params: PaginatedRequestParams | None
+    ) -> ListResourcesResult:
+        del ctx, params
         # The namespaced form exists only where MCP requires a globally unique
         # uri; reference values everywhere the model acts keep the wire
         # spelling, so there is no bidirectional rewriting to get wrong.
-        return [
-            Resource(
-                uri=AnyUrl(f"labwire://{instrument.prefix}/{spec.uri.removeprefix('labwire:')}"),
-                name=f"{instrument.prefix}: {spec.title}",
-                description=spec.description,
-                mimeType="application/json",
-            )
-            for instrument in instruments
-            for spec in instrument.descriptor.resources
-        ]
+        return ListResourcesResult(
+            resources=[
+                Resource(
+                    uri=f"labwire://{instrument.prefix}/{spec.uri.removeprefix('labwire:')}",
+                    name=f"{instrument.prefix}: {spec.title}",
+                    description=spec.description,
+                    mime_type="application/json",
+                )
+                for instrument in instruments
+                for spec in instrument.descriptor.resources
+            ]
+        )
 
-    @server.read_resource()
-    async def _read_resource(uri: AnyUrl) -> str:  # pyright: ignore[reportUnusedFunction]
-        text = str(uri)
+    async def read_resource(
+        ctx: ServerRequestContext[Any, Any], params: ReadResourceRequestParams
+    ) -> ReadResourceResult:
+        del ctx
+        text = str(params.uri)
         for instrument in instruments:
             marker = f"labwire://{instrument.prefix}/"
             if text.startswith(marker):
                 wire_uri = "labwire:" + text.removeprefix(marker)
                 snapshot = await instrument.client.read_resource(wire_uri)
-                return snapshot.model_dump_json(exclude_none=True)
-        raise ValueError(f"unknown resource: {uri}")
+                return ReadResourceResult(
+                    contents=[
+                        TextResourceContents(
+                            uri=text,
+                            mime_type="application/json",
+                            text=snapshot.model_dump_json(exclude_none=True),
+                        )
+                    ]
+                )
+        raise MCPError(code=INVALID_PARAMS, message=f"unknown resource: {params.uri}")
 
-    @server.call_tool()
-    async def _call_tool(  # pyright: ignore[reportUnusedFunction]
-        name: str, arguments: dict[str, Any]
-    ) -> list[TextContent]:
+    async def call_tool(
+        ctx: ServerRequestContext[Any, Any], params: CallToolRequestParams
+    ) -> CallToolResult | InputRequiredResult:
+        name = params.name
+        arguments = dict(params.arguments or {})
         for instrument in instruments:
             if name == f"{instrument.prefix}__read_resource":
                 snapshot = await instrument.client.read_resource(str(arguments["uri"]))
-                return [TextContent(type="text", text=snapshot.model_dump_json(exclude_none=True))]
+                return _ok(snapshot.model_dump_json(exclude_none=True))
             spec = instrument.commands.get(name)
             if spec is not None:
-                return await _run_command(instrument, spec, arguments)
-        raise ValueError(f"unknown tool: {name}")
+                return await _run_command(
+                    ctx, instrument, spec, name, params, pending, s2_confirmation
+                )
+        raise MCPError(code=INVALID_PARAMS, message=f"unknown tool: {name}")
 
-    return server
+    return Server(
+        name="labwire",
+        # Tool and resource surfaces are fixed for the life of the process
+        # (they derive from the configured instruments), so lists cache
+        # generously; a resource READ is live instrument state (the deck
+        # changes with every liquid move) and must not be cached at all.
+        cache_hints={
+            "tools/list": CacheHint(ttl_ms=300_000, scope="private"),
+            "resources/list": CacheHint(ttl_ms=300_000, scope="private"),
+            "resources/read": CacheHint(ttl_ms=0, scope="private"),
+        },
+        on_list_tools=list_tools,
+        on_call_tool=call_tool,
+        on_list_resources=list_resources,
+        on_read_resource=read_resource,
+    )
+
+
+def _ok(text: str) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text=text)])
+
+
+def _tool_error(payload: dict[str, Any]) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload))], is_error=True
+    )
+
+
+def _approval_request(
+    instrument: ConnectedInstrument, spec: CommandSpec, arguments: dict[str, Any]
+) -> ElicitRequest:
+    """The S2 approval the client surfaces to the human (form mode, yes/no)."""
+    shown = {k: v for k, v in arguments.items() if k not in ("confirmation", "authorization")}
+    message = (
+        f"Approve running {spec.name!r} on "
+        f"{instrument.descriptor.identity.model}? Safety class S2: costly or "
+        f"irreversible. Exact parameters: {json.dumps(shown, sort_keys=True)}. "
+        "Approving supplies this deployment's standing confirmation; it does "
+        "not identify who approved."
+    )
+    return ElicitRequest(
+        method="elicitation/create",
+        params=ElicitRequestFormParams(
+            message=message,
+            requested_schema={
+                "type": "object",
+                "properties": {
+                    "approve": {
+                        "type": "boolean",
+                        "description": "true to run the command, false to refuse",
+                    }
+                },
+                "required": ["approve"],
+            },
+        ),
+    )
+
+
+def _grant_request(
+    instrument: ConnectedInstrument, spec: CommandSpec, refusal: dict[str, Any]
+) -> ElicitRequest:
+    """The S3 elicitation: the operator mints a grant and the human types it.
+
+    A grant id is minted per request by `labwire grant approve`; the
+    adapter cannot pre-hold one, so typing it is not ceremony, it is the
+    only possible flow.
+    """
+    details = cast("dict[str, Any]", refusal.get("details") or {})
+    request_id = details.get("request_id", "?")
+    instruction = details.get("operator_instruction") or (
+        f"On the instrument host run: labwire grant list, then "
+        f"labwire grant approve {request_id} --ttl 15m --uses 1"
+    )
+    message = (
+        f"{spec.name!r} on {instrument.descriptor.identity.model} is safety "
+        f"class S3 (hazardous) and needs an operator grant for exactly these "
+        f"parameters. Pending request: {request_id}. {instruction} Then enter "
+        "the grant id it printed."
+    )
+    return ElicitRequest(
+        method="elicitation/create",
+        params=ElicitRequestFormParams(
+            message=message,
+            requested_schema={
+                "type": "object",
+                "properties": {
+                    "grant_id": {
+                        "type": "string",
+                        "description": "the grant id the operator command printed",
+                    }
+                },
+                "required": ["grant_id"],
+            },
+        ),
+    )
 
 
 async def _run_command(
+    ctx: ServerRequestContext[Any, Any],
+    instrument: ConnectedInstrument,
+    spec: CommandSpec,
+    tool_name: str,
+    params: CallToolRequestParams,
+    pending: dict[str, _PendingApproval],
+    s2_confirmation: str | None,
+) -> CallToolResult | InputRequiredResult:
+    arguments = dict(params.arguments or {})
+
+    # --- resume an input_required round (modern era only) -------------------
+    if params.request_state:
+        entry = pending.pop(str(params.request_state), None)
+        if entry is None or entry.tool != tool_name:
+            return _tool_error(
+                {
+                    "error": "unknown or already-used request_state; start the call over",
+                    "category": "validation",
+                }
+            )
+        responses = {
+            key: value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+            for key, value in (params.input_responses or {}).items()
+        }
+        answer = cast("dict[str, Any]", responses.get("approval") or {})
+        action = answer.get("action")
+        content = cast("dict[str, Any]", answer.get("content") or {})
+        if entry.kind == "s2":
+            if action != "accept" or content.get("approve") is not True:
+                return _tool_error(
+                    {
+                        "error": f"operator declined {spec.name!r}; nothing was submitted",
+                        "category": "confirmation_required",
+                    }
+                )
+            arguments = dict(entry.arguments)
+            arguments["confirmation"] = s2_confirmation
+        else:  # s3
+            grant_id = content.get("grant_id")
+            if action != "accept" or not grant_id:
+                return _tool_error(
+                    {
+                        "error": f"no grant supplied for {spec.name!r}; nothing was submitted",
+                        "category": "authorization_required",
+                    }
+                )
+            arguments = dict(entry.arguments)
+            arguments["authorization"] = {"grant_id": str(grant_id)}
+
+    # --- S2: modern era surfaces the approval to the human ------------------
+    elif (
+        spec.safety_class == "S2"
+        and "confirmation" not in arguments
+        and s2_confirmation is not None
+        and _era_is_modern(ctx)
+    ):
+        token = secrets.token_urlsafe(24)
+        pending[token] = _PendingApproval(tool=tool_name, arguments=arguments, kind="s2")
+        return InputRequiredResult(
+            input_requests={"approval": _approval_request(instrument, spec, arguments)},
+            request_state=token,
+        )
+
+    outcome = await _submit(instrument, spec, arguments)
+
+    # --- S3: turn the refusal into a client-surfaced grant entry ------------
+    if (
+        isinstance(outcome, dict)
+        and outcome.get("category") == "authorization_required"
+        and _era_is_modern(ctx)
+        and not params.request_state
+    ):
+        token = secrets.token_urlsafe(24)
+        details = cast("dict[str, Any]", outcome.get("details") or {})
+        pending[token] = _PendingApproval(
+            tool=tool_name,
+            arguments=arguments,
+            kind="s3",
+            request_id=str(details.get("request_id", "")),
+        )
+        return InputRequiredResult(
+            input_requests={"approval": _grant_request(instrument, spec, outcome)},
+            request_state=token,
+        )
+
+    if isinstance(outcome, dict):
+        return _tool_error(outcome)
+    return _ok(outcome)
+
+
+async def _submit(
     instrument: ConnectedInstrument, spec: CommandSpec, arguments: dict[str, Any]
-) -> list[TextContent]:
+) -> str | dict[str, Any]:
+    """Run one command; a str is success JSON, a dict is a structured error."""
     timeout = (
         spec.estimated_duration_s * 5.0
         if spec.estimated_duration_s is not None
@@ -310,29 +568,20 @@ async def _run_command(
         )
         result = await handle.result(timeout=timeout)
     except LabwireError as exc:
-        if exc.details:
-            # Flattening to str(exc) would destroy request_id, did_you_mean,
-            # and the ready-to-send read request; the recovery paths the
-            # protocol designed live in these fields, so the model gets them.
-            return [
-                TextContent(
-                    type="text",
-                    text=json.dumps(
-                        {
-                            "error": str(exc),
-                            "category": exc.category,
-                            "retryable": exc.retryable,
-                            "details": exc.details,
-                        }
-                    ),
-                )
-            ]
-        raise ValueError(
-            f"{exc.category} error from {instrument.descriptor.identity.model}: {exc} "
-            f"(retryable: {exc.retryable})"
-        ) from exc
-    except TimeoutError as exc:
-        raise ValueError(
-            f"command {spec.name!r} did not reach a terminal state within {timeout:.0f} s"
-        ) from exc
-    return [TextContent(type="text", text=json.dumps(result))]
+        # Flattening to str(exc) would destroy request_id, did_you_mean,
+        # and the ready-to-send read request; the recovery paths the
+        # protocol designed live in these fields, so the model gets them.
+        return {
+            "error": str(exc),
+            "category": exc.category,
+            "retryable": exc.retryable,
+            "details": exc.details,
+        }
+    except TimeoutError:
+        return {
+            "error": f"command {spec.name!r} did not reach a terminal state within {timeout:.0f} s",
+            "category": "device_timeout",
+            "retryable": False,
+            "details": None,
+        }
+    return json.dumps(result)

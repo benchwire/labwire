@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core>=0.4.1,<0.5", "mcp>=1.2,<2"]
+dependencies = ["labwire-core>=0.4.1,<0.5", "mcp>=2,<3"]
 
 [project.scripts]
 labwire-mcp = "labwire.mcp.main:main"

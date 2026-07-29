@@ -6,6 +6,7 @@ Example:
 
 import argparse
 import asyncio
+import os
 import sys
 
 from labwire.mcp.server import build_server, connect_instruments
@@ -14,9 +15,13 @@ from mcp.server.stdio import stdio_server
 
 
 async def _serve(urls: list[str]) -> None:
+    # The S2 standing confirmation comes from the ENVIRONMENT, never a CLI
+    # flag: flags are visible in process listings, environments are not.
+    # Without it, S2 calls keep the legacy parameter path only.
+    confirmation = os.environ.get("LABWIRE_MCP_CONFIRMATION")
     instruments = await connect_instruments(urls)
     try:
-        server = build_server(instruments)
+        server = build_server(instruments, s2_confirmation=confirmation)
         async with stdio_server() as (read, write):
             await server.run(read, write, server.create_initialization_options())
     finally:
