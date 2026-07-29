@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-cli"
-version = "0.4.1"
+version = "0.5.0"
 description = "Labwire command-line tools: verify signed run bundles"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core>=0.4.1,<0.5", "labwire-drivers>=0.4.1,<0.5", "typer>=0.12,<1"]
+dependencies = ["labwire-core>=0.5,<0.6", "labwire-drivers>=0.5,<0.6", "typer>=0.12,<1"]
 
 [project.scripts]
 labwire = "labwire.cli.main:main"

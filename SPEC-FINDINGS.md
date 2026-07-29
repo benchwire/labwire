@@ -12,10 +12,12 @@ on the deck this morning. Its interesting state is a tree. Building the
 whether the capability model generalizes, and this file is the result:
 everything that strained, written down while it was straining.
 
-Nine findings. The two blocking ones (F1, F2) and the enforcement gap behind
-the safety story (F4) drove protocol v0.3 and are resolved there, each with
-its residual stated in place. F5 was a hole in the v0.2 headline guarantee,
-fixed immediately in 0.2.1. The last section lists what did *not* strain,
+Eleven findings so far. The two blocking ones (F1, F2) and the enforcement
+gap behind the safety story (F4) drove protocol v0.3 and are resolved there,
+each with its residual stated in place. F5 was a hole in the v0.2 headline
+guarantee, fixed immediately in 0.2.1. F10 arrived from the field and drove
+protocol 0.4; F11 came out of carrying 0.4's settlement guarantees across a
+foreign protocol boundary. The last section lists what did *not* strain,
 which matters just as much and is the part a findings document usually
 leaves out.
 
@@ -34,6 +36,8 @@ list; the work itself is scheduled in [ROADMAP.md](ROADMAP.md).
 | F7 | Preconditions are discoverable only by failing | small, cheap |
 | F8 | A command has no point of no return | worth naming |
 | F9 | The unit guarantee covers declarations, not payloads | significant |
+| F10 | A stop request returning is not motion stopping | **resolved in 0.4** |
+| F11 | Settlement is structured inside Labwire and prose at the boundary | small |
 
 ---
 
@@ -673,3 +677,34 @@ product is signed records of what physically happened.
 - A `"between_steps"` boundary stops the SEQUENCE; the step in flight
   still runs to completion, and on hardware that step's duration is the
   irreducible latency of any cancel.
+
+## F11. Settlement is structured inside Labwire and prose at the boundary
+
+**Severity: small, found at a foreign protocol boundary.** Porting the
+MCP adapter to the 2026-07-28 revision meant expressing 0.4's
+cancellation guarantees in another protocol's task model
+(`io.modelcontextprotocol/tasks`), and two things happened, one
+validating and one instructive.
+
+The validating one: the extension's `tasks/cancel` is cooperative by
+design. The acknowledgment promises nothing; the server MAY keep
+running. That is F10's resolution arrived at independently by another
+protocol team: cancellation as request, not command, with the truth in
+what the run finally reports. Labwire's three cancel semantics mapped
+onto it without residue: `"none"` acks the cancel and runs to
+completion, exactly as the extension permits, and `"abort"` and
+`"between_steps"` initiate a real cancel and settle per SPEC 8.3.
+
+The instructive one: the mapping lost information at exactly one place,
+and it was the settlement block. A cancelled MCP task carries **no
+result field**, so the structured settlement record (outcome, boundary
+provenance, the signed bundle reference) has no slot; the adapter
+compresses it into a free-text `statusMessage` sentence. Inside Labwire,
+settlement is machine-checkable structure; one protocol boundary later
+it is prose that each adapter phrases its own way.
+
+**Recommendation.** The spec should define a canonical one-line
+settlement summary (a fixed field order rendered as text) so that every
+adapter degrades identically when a foreign protocol offers only a
+string. Not scheduled for a version yet; recorded here so the next
+adapter does not invent a third phrasing.

@@ -224,6 +224,13 @@ identity, so Claude discovers and drives the hardware natively. See
 [examples/mcp-config.json](examples/mcp-config.json) for a Claude-style MCP
 server entry.
 
+The adapter speaks the MCP 2026-07-28 revision and the classic handshake era
+from the same process. On 2026-era hosts, an unconfirmed S2 command becomes
+an approval the host surfaces to a human, and long-running commands become
+pollable tasks for clients that declare the tasks extension. The
+[labwire-mcp README](packages/mcp/README.md) has the era matrix and the
+honest caveats.
+
 ## Honesty and scope
 
 The three instruments are **original simulated device models**, with

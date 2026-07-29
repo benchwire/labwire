@@ -1,8 +1,57 @@
 # Changelog
 
-All notable changes to Labwire. The protocol version (`"0.2"`) and the
-package versions move together while the project is pre-1.0; breaking
-changes are expected until then, and are called out explicitly.
+All notable changes to Labwire. Package versions move in lockstep; the
+protocol version (currently `"0.4"`) changes only when the wire changes
+and each release states which one it speaks. Breaking changes are
+expected while the project is pre-1.0, and are called out explicitly.
+
+## 0.5.0, 2026-07-29
+
+Protocol version stays `"0.4"`; nothing on the Labwire wire changed.
+This release is the MCP boundary: the adapter moves to the MCP
+2026-07-28 revision and the Python SDK v2, published one day earlier.
+
+### Breaking
+
+- `labwire-mcp` now requires `mcp>=2,<3` (was `>=1.2,<2`). Hosts pinned
+  to the v1 SDK should stay on labwire-mcp 0.4.1.
+
+### Added
+
+- **Dual-era MCP service.** One adapter process serves 2026-07-28
+  clients (per-request metadata, `server/discover`, required cache
+  hints, `-32602` for unknown tools) and handshake-era clients
+  (`initialize`) with no configuration. Every adapter test runs in both
+  eras against the same server object.
+- **Human-in-the-loop confirmation.** On the 2026 era, an S2 command
+  called without a confirmation returns `input_required` with an
+  elicitation showing the exact command and parameters; the host
+  surfaces it to a human, and approval injects the standing
+  confirmation (from `LABWIRE_MCP_CONFIRMATION`, an environment
+  variable, never a CLI flag). S3 elicitations carry the refusal's
+  request id and the `labwire grant approve` command; the human types
+  the minted grant id. Neither path identifies WHO approved
+  (`identity_verified: false`, as before); the docs say so plainly.
+  `examples/mcp_confirmation.py` runs the round trip with zero
+  hardware.
+- **Tasks (experimental).** For 2026-era clients declaring the
+  `io.modelcontextprotocol/tasks` extension, commands with
+  `estimated_duration_s` of 10 s or more return pollable tasks. The
+  extension is hand-implemented from its spec text (the SDK excludes
+  it). Status mapping is honest about the two impedance points: task
+  `failed` is reserved for JSON-RPC faults, so instrument failures are
+  `completed` with `isError` inside the result; a `cancelled` task
+  carries no result, so the settlement outcome rides `statusMessage`
+  and the signed bundle stays on the instrument host. `tasks/cancel`
+  is cooperative, which maps `cancel_semantics` exactly.
+- SPEC-FINDINGS **F11**: settlement is structured inside Labwire and
+  prose at a foreign protocol boundary; the cooperative cancel design
+  of MCP tasks independently validates F10's resolution.
+
+### Changed
+
+- All packages released as 0.5.0 in lockstep; `labwire-*`
+  cross-dependency bounds move to `>=0.5,<0.6`.
 
 ## 0.4.1, 2026-07-29
 

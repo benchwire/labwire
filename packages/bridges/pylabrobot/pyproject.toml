@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-pylabrobot"
-version = "0.4.1"
+version = "0.5.0"
 description = "Expose PyLabRobot liquid handlers as Labwire instruments"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core>=0.4.1,<0.5", "pyyaml>=6,<7", "typer>=0.12,<1"]
+dependencies = ["labwire-core>=0.5,<0.6", "pyyaml>=6,<7", "typer>=0.12,<1"]
 
 [project.optional-dependencies]
 # PyLabRobot is optional: the bridge is only usable with it, but labwire-core
