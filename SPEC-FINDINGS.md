@@ -486,7 +486,12 @@ preceded by" would let an agent order a plan correctly on the first attempt.
 
 ## F8. A command has no point of no return
 
-**Severity: worth naming; no clean fix proposed.**
+**Severity: worth naming. SUPERSEDED by F10, resolved in protocol 0.4.**
+F8 named the problem from the inside; F10 is the same problem arriving
+from the field with evidence, and its resolution (declared cancel
+semantics, acknowledgment vs settlement, and records that earn their
+claims) is the fix this finding said was worth exploring. Kept as
+written below, because findings are history.
 
 Labwire models cancellation as available for the whole life of a running
 command. An aspiration is not like that. Partway through, the liquid is in the
@@ -595,3 +600,76 @@ to do it to. Safety classes grade commands; F3 asks them to grade calls.
 
 Those three changes would take the protocol from one that fits signal-shaped
 instruments to one that fits laboratories.
+---
+
+## F10. A stop request returning is not motion stopping
+
+**Severity: blocking for any honest safety claim. RESOLVED in protocol
+0.4.** The only finding so far that arrived from the field rather than
+from building a bridge, which is exactly what a public protocol is for.
+
+Reported by PyLabRobot forum user **vcjdeboer**, who owns an Opentrons
+Flex, in the thread on this project's bridge
+(<https://discuss.pylabrobot.org/t/bridged-pylabrobot-into-an-agent-facing-protocol/552>),
+with the PyLabRobot maintainer concurring on the default backend
+behavior. Two facts, both from people with the hardware on the bench:
+
+1. **OT-3/Flex:** `ProtocolEngine.request_stop()` attempts to interrupt
+   the running command and cancels queued ones, but by the time it
+   returns, things may not have settled and the last command may still
+   be running. Only the emergency stop truly halts motion at lower
+   layers. A stop RETURNING does not mean motion STOPPED.
+2. **Hamilton STAR via PLR:** there is no cancel or abort in the
+   backend. `send_command` writes to USB and awaits a future matched by
+   a reader thread. Cancelling the coroutine only stops the WAITING;
+   the command is already on the wire and the machine executes it
+   regardless.
+
+Our bridge did the indicted thing: `_operate` polled for the cancel,
+called `lh.stop()` with exceptions suppressed, abandoned the in-flight
+await, and reported `canceled` while the hardware, on a real machine,
+would have kept moving. The ophyd bridge's own comment said it reported
+the cancel "whether or not the device obeys stop()", and `ophyd.sim`
+axes' `stop()` is literally `pass`. Reported state diverging from
+physical state is the worst failure available to a protocol whose
+product is signed records of what physically happened.
+
+### Resolution (protocol 0.4)
+
+- Every command declares `cancel_semantics`: `"abort"` (a real halt
+  path the backend can confirm), `"between_steps"` (a bridge-sequenced
+  routine that stops only at boundaries), or `"none"` (committed once
+  running). Undeclared means `"none"`, and a cancel against `"none"` is
+  refused with `-32007`, never accepted-and-ignored.
+- Acknowledgment is not settlement: `canceling` means accepted, and
+  every run that ends by or during cancellation carries a `cancellation`
+  block stating what actually happened: `never_started`, `halted`
+  (backend-confirmed only), `halted_at_boundary` (only from a boundary
+  checkpoint itself), `ran_to_completion`, or `unconfirmed`, the honest
+  case, first-class.
+- The block is signed manifest content, and 0.4 manifests record each
+  command's declared semantics so `labwire verify` rejects offline what
+  the spec forbids: a `canceled` record with no block, a `halted` claim
+  from a non-abort command, a boundary claim from a command with no
+  boundaries.
+- Bridge truth: every atomic PyLabRobot call declares `"none"`;
+  `transfer` is bridge-sequenced and stops between steps; the
+  abandon-the-await machinery is gone. `EpicsMotor`-family moves
+  declare `"abort"`; `ophyd.sim` axes declare `"none"`.
+- A 24-agent adversarial review of the implementation confirmed and
+  closed nine further settlement holes (blockless shutdown records,
+  pre-start cancels claiming halts, boundary claims from mid-step
+  abandonment, and others) before release.
+
+### Residual, stated plainly
+
+- `EpicsMotor.stop()` writing the .STOP field has never been exercised
+  against a real EPICS IOC (TODO-VERIFY in the bridge).
+- An annotation that upgrades a device to `"abort"` asserts that the
+  device's status resolution reflects physical reality; for a device
+  whose `stop()` resolves its own status locally, `"halted"` is only as
+  true as that assertion. The annotation is documented as a truth claim
+  about the bench for exactly this reason.
+- A `"between_steps"` boundary stops the SEQUENCE; the step in flight
+  still runs to completion, and on hardware that step's duration is the
+  irreducible latency of any cancel.

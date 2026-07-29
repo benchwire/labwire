@@ -4,9 +4,55 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
-## Unreleased
+## 0.4.0, 2026-07-29
+
+Protocol version `"0.4"`: cancellation made honest. Driven by field
+reports from an Opentrons Flex owner (vcjdeboer on the PyLabRobot forum)
+and the PyLabRobot maintainer: a stop request returning does not mean
+motion stopped, and a Hamilton STAR command is on the wire before any
+cancel can matter. SPEC-FINDINGS F10 documents both reports and the
+resolution; F8 is superseded by it.
+
+### Breaking
+
+- `interruptible` is removed from command capabilities; its
+  cancellable-by-default abandon-the-handler semantics are the behavior
+  the field reports indicted. `cancel_semantics` (`"abort"`,
+  `"between_steps"`, `"none"`) replaces it, and undeclared commands
+  default to `"none"`: not cancellable mid-run.
+- Cancelling a running `"none"` command is refused with `-32007`, never
+  accepted-and-ignored. Completion now wins the race: a run that
+  finishes while `canceling` settles `succeeded` with a
+  `ran_to_completion` block, where 0.3 reported `canceled` after a
+  completed action.
 
 ### Added
+
+- **Settlement** (SPEC 8.3): acknowledgment is not settlement. Every run
+  that ends by or during cancellation carries a signed `cancellation`
+  block: `never_started`, `halted` (backend-confirmed only),
+  `halted_at_boundary` (only from a boundary checkpoint itself),
+  `ran_to_completion`, or `unconfirmed`, the honest first-class case.
+  Handler API: `ctx.boundary()` for between-steps commands,
+  `ctx.confirm_halted()` for aborts. 0.4 manifests record each command's
+  declared semantics, and `labwire verify` rejects offline what the
+  spec forbids: blockless `canceled` records, `halted` claims from
+  non-abort commands, boundary claims from commands with no boundaries.
+  A 24-agent adversarial review closed nine settlement holes (blockless
+  shutdown records, pre-start cancels claiming halts, boundary claims
+  from mid-step abandonment, and others) before release.
+- **Bridge truth**: PyLabRobot's abandon-the-await cancel is gone; every
+  atomic call declares `"none"`, and `transfer`, now sequenced by the
+  bridge, stops between steps with the boundary named in the record.
+  Ophyd declares `"abort"` only for `EpicsMotor`-family devices
+  (TODO-VERIFY on real EPICS) with a settlement window on the status
+  object; `ophyd.sim` axes are `"none"` because their `stop()` is
+  literally `pass`. The syringe-pump driver earns `"abort"`: STP then a
+  confirmed IDLE before any halt is claimed. MCP tool descriptions state
+  each tool's cancel semantics; the demos show a refused cancel, an
+  earned halt, and a boundary settlement.
+
+### Added in the adoption-engineering cycle
 
 - **`labwire-conformance`** (SPEC §15.3): an executable conformance suite
   that points at ANY server over WebSocket and checks the spec's normative
