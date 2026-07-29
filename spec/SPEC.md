@@ -634,21 +634,28 @@ Acceptance rules:
 `cancellation` object on its terminal CommandStatus and in its signed
 manifest (§13.1):
 
-- `requested_at` (string, REQUIRED): when the cancel was accepted.
+- `requested_at` (string or null): when a `command/cancel` was accepted,
+  or null when the run ended by cancellation no client ever requested
+  (server shutdown, a handler-initiated stop).
 - `outcome` (string, REQUIRED):
+  - `"never_started"`: the cancel arrived before the handler ran;
+    nothing was ever issued. The one outcome the server itself can
+    confirm.
   - `"halted"`: the backend CONFIRMED the physical stop. Only an
     `"abort"` command can settle this way, and only on positive
     confirmation.
   - `"halted_at_boundary"`: a `"between_steps"` command finished its
-    in-flight step and stopped at the boundary.
-  - `"ran_to_completion"`: completion won the race; the terminal status
-    is `succeeded` or `failed`, and this block records that a cancel
-    was pending when it finished.
-  - `"unconfirmed"`: the stop was requested but the backend did not
-    confirm the physical state within the server's settlement window.
-    The terminal status is `canceled` and this is all the manifest
-    asserts. This outcome is not a failure of the protocol; it is the
-    truth, and servers MUST use it rather than guessing.
+    in-flight step and stopped AT a declared boundary checkpoint. The
+    stop must have originated at the checkpoint itself; a handler that
+    went past a boundary and then gave up mid-step MUST settle
+    `"unconfirmed"` instead, whatever boundaries it passed earlier.
+  - `"ran_to_completion"`: the run concluded on its own terms while a
+    cancel was pending; the terminal status is `succeeded` or `failed`.
+  - `"unconfirmed"`: the run ended because of cancellation but nothing
+    confirmed the physical state: a stop the backend never
+    acknowledged, a handler terminated from outside, a crash while a
+    cancel was pending. This outcome is not a failure of the protocol;
+    it is the truth, and servers MUST use it rather than guessing.
 - `boundary` (object, present iff `outcome` is `"halted_at_boundary"`):
   `{completed_steps (integer), of_steps (integer or null), last
   (string)}`, the last step that completed.
@@ -657,9 +664,12 @@ manifest (§13.1):
 
 A terminal status of `canceled` asserts only that the run ended because
 of cancellation; the physical claim lives entirely in
-`cancellation.outcome`. A signed manifest MUST NOT contain a `canceled`
-status without a `cancellation` block, and MUST NOT claim `"halted"`
-without backend confirmation.
+`cancellation.outcome`. EVERY `canceled` terminal status MUST carry the
+block, however the run came to be cancelled, including cancellations no
+client requested; a `succeeded` or `failed` run that had accepted a
+cancel MUST carry it too. A signed manifest MUST NOT contain a
+`canceled` status without a `cancellation` block, and MUST NOT claim
+`"halted"` without backend confirmation.
 
 ### 8.4 Concurrency
 
@@ -1175,12 +1185,17 @@ All fields are REQUIRED unless marked otherwise:
   artifact. `identity_verified` exists so the honesty caveat of §8.6 is a
   machine-checkable wire fact rather than prose: verifiers MUST surface
   it, and a future version with cryptographic operator identity flips it.
-- `cancellation` (object, present iff a cancel was accepted for the
-  run): the settlement block of §8.3, covered by the signature. A signed
-  manifest MUST NOT record a `canceled` status without it, and MUST NOT
-  record `outcome: "halted"` the backend did not confirm: a manifest
-  that asserts a physical halt the backend cannot vouch for is worse
-  than no manifest at all.
+- `cancellation` (object, present per §8.3's block rules): the
+  settlement block, covered by the signature. A signed manifest MUST NOT
+  record a `canceled` status without it, and MUST NOT record
+  `outcome: "halted"` the backend did not confirm: a manifest that
+  asserts a physical halt the backend cannot vouch for is worse than no
+  manifest at all. The `command` block records `cancel_semantics` (0.4
+  manifests) precisely so these rules are auditable offline: a verifier
+  MUST reject a 0.4 manifest whose status is `canceled` with no
+  `cancellation` block, whose `"halted"` outcome sits on a command not
+  declared `"abort"`, or whose `"halted_at_boundary"` sits on a command
+  not declared `"between_steps"`.
 - `resource_revisions` (array, OPTIONAL): for each resource the run
   changed, `{uri, revision_at_start, revision_at_end}`, so an auditor can
   ask whether state moved under the run.

@@ -22,8 +22,6 @@ Example:
     >>> # await InstrumentServer(instrument).serve_websocket("127.0.0.1", 9520)
 """
 
-import asyncio
-import contextlib
 import functools
 from collections.abc import Awaitable
 from typing import Any, cast
@@ -33,7 +31,6 @@ from labwire.bridges.pylabrobot.annotations import AnnotationFile, check
 from labwire.bridges.pylabrobot.deck import DeckState, deck_snapshot, locked_labware
 from labwire.bridges.pylabrobot.introspect import command_surface, introspect
 from labwire.core import (
-    CanceledError,
     CommandContext,
     HardwareFaultError,
     Instrument,
@@ -295,32 +292,23 @@ class PyLabRobotBridge(Instrument):
             )
 
     async def _operate(self, ctx: CommandContext, coro: Any, what: str) -> None:
-        """Await a PyLabRobot operation, honouring cancellation as far as it can.
+        """Await a PyLabRobot operation to completion, mapping its errors.
 
-        Each operation is a single await, so cancellation means stopping the
-        handler and abandoning the call rather than interrupting it partway.
-        Against the chatterbox backend operations complete immediately, so a
-        cancel almost always loses the race. What that means on hardware has
-        never been tested. See LIMITATIONS.
+        There is deliberately no cancellation here. PyLabRobot has no abort:
+        a Hamilton STAR command is on the USB wire before any cancel can
+        matter, and the Flex's stop request returning does not mean motion
+        stopped (SPEC-FINDINGS F10, field-reported). The old behavior,
+        abandoning this await and reporting canceled while hardware kept
+        moving, was the exact failure the field report indicted. Every
+        atomic command therefore declares cancel_semantics "none" and this
+        await runs to the end; the one sequenced command (transfer) stops
+        only at step boundaries, never inside a call.
         """
-        task = asyncio.ensure_future(coro)
+        del ctx  # cancellation is settled at boundaries, never mid-call
         try:
-            while not task.done():
-                if ctx.cancel_requested:
-                    stop = getattr(self._lh, "stop", None)
-                    if callable(stop):
-                        # A failed stop must not mask the cancellation itself.
-                        with contextlib.suppress(Exception):
-                            await cast("Awaitable[None]", stop())
-                    task.cancel()
-                    raise CanceledError(f"{what} canceled by request")
-                await ctx.sleep(_POLL_S)
-        finally:
-            if not task.done():
-                task.cancel()
-        exception = task.exception()
-        if exception is not None:
-            raise map_error(exception)
+            await cast("Awaitable[Any]", coro)
+        except Exception as exc:
+            raise map_error(exc) from exc
 
     def _check_lengths(self, addresses: list[str], volumes: list[float], what: str) -> None:
         if len(addresses) != len(volumes):
@@ -420,20 +408,37 @@ class PyLabRobotBridge(Instrument):
         targets: list[Container],  # pyright: ignore[reportInvalidTypeForm, reportUnknownParameterType, reportGeneralTypeIssues]
         volumes_ul: list[float],
     ) -> TransferResult:
-        """Move liquid from one well into others in a single command."""
+        """Move liquid from one well into others, stopping only at boundaries.
+
+        The bridge sequences this itself (one aspirate, then one dispense
+        per target), which is what earns it cancel_semantics
+        "between_steps": a cancel finishes the PLR call in flight and stops
+        before the next one is issued, and the record names the boundary.
+        A cancel after the aspirate leaves liquid in the tip. The deck
+        resource shows the source's deficit and the mounted tip, because
+        each step's accounting lands when the step does; the tip's own
+        contents are tracked by PyLabRobot but not exposed per channel.
+        """
         self._check_lengths(targets, volumes_ul, "transfer")
         source_well = resolve(self._lh, source)
         target_wells = resolve_all(self._lh, targets)
         self._refuse_locked([source_well, *target_wells])
-        await self._operate(
-            ctx,
-            self._lh.transfer(source_well, target_wells, target_vols=volumes_ul),
-            "transfer",
-        )
         total = sum(volumes_ul)
+        steps = 1 + len(target_wells)
+
+        await self._operate(ctx, self._lh.aspirate([source_well], vols=[total]), "aspirate")
         self._aspirated += total
-        self._dispensed += total
         self._publish_state()
+        ctx.boundary("aspirate", of=steps)
+
+        for index, (well, volume, uri) in enumerate(
+            zip(target_wells, volumes_ul, targets, strict=True)
+        ):
+            await self._operate(ctx, self._lh.dispense([well], vols=[volume]), f"dispense {uri}")
+            self._dispensed += volume
+            self._publish_state()
+            if index < len(target_wells) - 1:  # no boundary after the last step
+                ctx.boundary(f"dispense {uri}", of=steps)
         return TransferResult(source=source, targets=targets, total_volume_ul=total)
 
     async def do_set_well_volume(
@@ -627,9 +632,12 @@ def PyLabRobotInstrument(
             ),
             description=(override.description if override else None) or spec.description,
             estimated_duration_s=(override.estimated_duration_s if override else None),
-            # A plate held in the gripper mid-traverse has no safe interruption;
-            # command/cancel on these returns -32007 instead (SPEC 8.3).
-            cancel="none",  # every atomic PLR call is committed once issued (F10)
+            # Every atomic PLR call is committed once issued (F10): a plate
+            # held in the gripper mid-traverse has no safe interruption, and
+            # an aspirate is on the wire before any cancel can matter. The
+            # one exception is transfer, which this bridge sequences itself
+            # and can therefore honestly stop between steps.
+            cancel="between_steps" if spec.name == "transfer" else "none",
         )(implementation)
 
     generated = type("PyLabRobot_LiquidHandler", (PyLabRobotBridge,), namespace)

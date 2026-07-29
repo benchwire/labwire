@@ -120,8 +120,10 @@ class CancellationBoundary(_Msg):
 class Cancellation(_Msg):
     """Settlement of an accepted cancel: what actually happened (SPEC §8.3)."""
 
-    requested_at: str
-    outcome: Literal["halted", "halted_at_boundary", "ran_to_completion", "unconfirmed"]
+    requested_at: str | None = None
+    outcome: Literal[
+        "never_started", "halted", "halted_at_boundary", "ran_to_completion", "unconfirmed"
+    ]
     boundary: CancellationBoundary | None = None
     detail: str | None = None
 

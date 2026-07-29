@@ -672,3 +672,63 @@ def test_the_agent_demo_prompt_contains_no_discovery_hints() -> None:
         "tips/",
     ):
         assert hint not in prompt, f"prompt still hints: {hint!r}"
+
+
+async def test_transfer_cancel_settles_at_the_aspirate_boundary(
+    served: tuple[LiquidHandler, LabwireClient],
+) -> None:
+    """F10 resolution: the in-flight PLR call finishes, the next is never
+    issued, and the record names the boundary. The liquid is in the tip:
+    the deck shows the source's deficit and no dispense ever landed."""
+    rig, client = served
+    await _call(
+        client, "set_well_volume", {"well": "labwire:deck/source_plate/A1", "volume_ul": 300.0}
+    )
+    await _call(client, "pick_up_tips", {"tip_spots": ["labwire:deck/tips/A1"]})
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original_aspirate = rig.aspirate
+
+    async def slow_aspirate(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        await release.wait()
+        return await original_aspirate(*args, **kwargs)
+
+    rig.aspirate = slow_aspirate  # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        handle = await client.submit(
+            "transfer",
+            {
+                "source": "labwire:deck/source_plate/A1",
+                "targets": ["labwire:deck/target_plate/A1", "labwire:deck/target_plate/B1"],
+                "volumes_ul": [50.0, 75.0],
+            },
+            confirmation=GRANT,
+        )
+        await asyncio.wait_for(entered.wait(), timeout=10.0)
+        status = await handle.cancel()
+        assert status.status == "canceling"
+        release.set()
+        deadline = asyncio.get_event_loop().time() + 10.0
+        while True:
+            current = await handle.status()
+            if current.status in ("succeeded", "failed", "canceled"):
+                break
+            assert asyncio.get_event_loop().time() < deadline
+            await asyncio.sleep(0.01)
+    finally:
+        rig.aspirate = original_aspirate  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert current.status == "canceled"
+    assert current.cancellation is not None
+    assert current.cancellation.outcome == "halted_at_boundary"
+    assert current.cancellation.boundary is not None
+    assert current.cancellation.boundary.last == "aspirate"
+    assert current.cancellation.boundary.completed_steps == 1
+    assert current.cancellation.boundary.of_steps == 3
+
+    snapshot = await client.read_resource("labwire:deck")
+    volumes = {well["uri"]: well["volume_ul"] for well in snapshot.content["contents"]}
+    assert volumes["labwire:deck/source_plate/A1"] == 175.0  # 125 uL left in the tip
+    assert "labwire:deck/target_plate/A1" not in volumes  # dispense never issued

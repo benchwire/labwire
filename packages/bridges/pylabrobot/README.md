@@ -203,15 +203,19 @@ Read this before believing anything above.
 - **Volumes are believed, not measured.** The trackers know what they have
   been told and what they have moved. Nothing looks into a plate. A run starts
   with `set_well_volume`, and if that is wrong everything after it is wrong.
-- **Cancellation is best-effort and untested on hardware.** Each operation is
-  a single await, so a cancel stops the handler and abandons the call rather
-  than interrupting it partway. Against the chatterbox backend operations
-  complete immediately, so a cancel almost always loses the race. An
-  aspiration cannot be un-aspirated in any case (SPEC-FINDINGS F8).
-- **Gripper moves are not exposed.** `move_plate`, `move_lid`, and
-  `move_resource` move labware through space, where the failure is a collision
-  rather than a bad pipetting step. They deserve their own treatment, and
-  doing them badly is worse than not doing them.
+- **Cancellation cannot interrupt a PyLabRobot call, and no longer
+  pretends to.** Field reports from an Opentrons Flex owner and the PLR
+  maintainer (SPEC-FINDINGS F10) established that a stop request
+  returning does not mean motion stopped, and that a Hamilton STAR
+  command is on the USB wire before any cancel can matter. Every atomic
+  command here therefore declares `cancel_semantics: "none"` and a
+  mid-run cancel is refused with `-32007`. The one exception is
+  `transfer`, which this bridge sequences itself: it declares
+  `"between_steps"`, a cancel stops it at a step boundary, and the
+  signed record names the boundary; the aspirated liquid stays in the
+  tip, visible as the source's deficit in the deck resource. The pre-0.4 behavior, abandoning
+  the in-flight call and reporting canceled while hardware kept moving,
+  is gone.
 - **96-head operations are not exposed**, and neither is PyLabRobot's
   untyped `backend_kwargs` passthrough to vendor firmware. Handing an agent an
   untyped channel into a vendor backend would undo the point of a typed

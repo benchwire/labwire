@@ -113,7 +113,7 @@ A working example lives at
 | `signal.set()` elsewhere | `set_<attr>`, safety class **S2** |
 | `Device.trigger()` | `trigger`, safety class **S1** |
 | `Device.stop()` | `stop`, safety class **S0** |
-| `command/cancel` | `device.stop()`, and the run ends canceled |
+| `command/cancel` | refused for most commands; `EpicsMotor`-family moves declare `abort` and settle only what the status object confirms |
 | ophyd failures | `HardwareFaultError` / `DeviceTimeoutError` |
 
 Safety defaults lean toward friction, because ophyd carries no safety
@@ -153,9 +153,19 @@ Read this before believing anything above.
 - **Units are validated for presence, not grammar.** The EGU→UCUM table
   covers conventional beamline spellings and is convention-based; it has not
   been checked against a UCUM implementation.
-- **Cancellation is best-effort and device-dependent.** Labwire's cancel
-  calls `device.stop()` and ends the run immediately; a simulated
-  `ophyd.sim` axis ignores `stop()` and still arrives at its target.
+- **Cancellation is declared per command, and the record earns its
+  claims.** `ophyd.sim` axes' `stop()` is literally `pass` (their move
+  completes no matter what), so their `move` declares
+  `cancel_semantics: "none"` and a mid-run cancel is refused rather than
+  reported as done. `EpicsMotor`-family devices declare `"abort"`,
+  because their `stop()` writes the motor record's .STOP field; after a
+  stop, the move's status object must resolve within a settlement window
+  before the record claims a halt, and otherwise the settlement is
+  `"unconfirmed"`, which means exactly what it says. An annotation may
+  downgrade any command to `"none"`; declaring `"abort"` in an
+  annotation is a truth claim about the bench, not a preference.
+  TODO-VERIFY: the abort path has never run against a real EPICS IOC.
+
 - **ophyd is synchronous.** Every call runs in a worker thread, so the server
   keeps answering, but a badly behaved device still occupies a thread.
 - **Array- and enum-valued signals are refused**: Labwire v0.2 channels

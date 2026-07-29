@@ -25,8 +25,8 @@ from labwire.bridges.ophyd.introspect import (
     Unresolved,
     UnresolvedReason,
 )
-from labwire.core import SafetyClass
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from labwire.core import CancelSemantics, SafetyClass
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
 SUPPORTED_VERSION = 1
 
@@ -113,10 +113,29 @@ class CommandAnnotation(_Strict):
     """
 
     safety_class: SafetyClass | None = None
+    cancel_semantics: CancelSemantics | None = None
+    """Override the drafted cancel semantics. Downgrading to "none" is
+    always safe; declaring "abort" asserts the deployment KNOWS the
+    device's stop() truly halts it, which is a truth claim about the
+    bench, not a preference. "between_steps" is refused below: this
+    bridge sequences nothing, so there is no boundary for a cancel to
+    stop at, and declaring one would produce accepted-and-ignored
+    cancels."""
     description: str | None = None
     estimated_duration_s: float | None = None
     exclude: bool = False
     """Drop a generated command that is meaningless for this device."""
+
+    @field_validator("cancel_semantics")
+    @classmethod
+    def _no_between_steps(cls, value: CancelSemantics | None) -> CancelSemantics | None:
+        if value == "between_steps":
+            raise ValueError(
+                "cancel_semantics 'between_steps' is not available in the ophyd "
+                "bridge: no command here is bridge-sequenced, so there is no "
+                "boundary to stop at; use 'abort' or 'none'"
+            )
+        return value
 
 
 class DeviceAnnotation(_Strict):
@@ -190,6 +209,7 @@ class ResolvedCommand(BaseModel):
     name: str
     description: str
     safety_class: SafetyClass
+    cancel_semantics: CancelSemantics = "none"
     component_key: str | None = None
     estimated_duration_s: float | None = None
 
@@ -437,6 +457,11 @@ def resolve(
                 name=command.name,
                 description=merged_command.description or command.description,
                 safety_class=merged_command.safety_class or component_class or command.safety_class,
+                cancel_semantics=(
+                    merged_command.cancel_semantics
+                    if merged_command.cancel_semantics is not None
+                    else command.cancel_semantics  # pyright: ignore[reportArgumentType]
+                ),
                 component_key=command.component_key,
                 estimated_duration_s=merged_command.estimated_duration_s,
             )

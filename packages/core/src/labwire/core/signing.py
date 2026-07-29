@@ -105,6 +105,7 @@ class ManifestCommand(_M):
     name: str
     params: dict[str, Any]
     safety_class: str | None = None
+    cancel_semantics: str | None = None
     params_digest: str | None = None
 
 
@@ -267,4 +268,28 @@ def verify_bundle(path: Path) -> VerificationResult:
             errors.append("data.digest does not match records.jsonl")
     else:
         warnings.append("records.jsonl absent: data.digest not recomputed")
+    if parsed.manifest_version == "0.4":
+        # SPEC 13.1: the cancellation MUSTs are offline-auditable in 0.4
+        # manifests precisely because the command block records
+        # cancel_semantics; a verifier MUST reject violations.
+        if parsed.status == "canceled" and parsed.cancellation is None:
+            errors.append(
+                "status is 'canceled' with no cancellation block (SPEC 8.3): "
+                "the record does not say what the cancel physically did"
+            )
+        if parsed.cancellation is not None:
+            declared = parsed.command.cancel_semantics
+            outcome_claim = parsed.cancellation.outcome
+            if outcome_claim == "halted" and declared != "abort":
+                errors.append(
+                    f"cancellation outcome 'halted' on a command declared "
+                    f"cancel_semantics {declared!r}: only 'abort' commands can "
+                    "claim a backend-confirmed halt (SPEC 8.3)"
+                )
+            if outcome_claim == "halted_at_boundary" and declared != "between_steps":
+                errors.append(
+                    f"cancellation outcome 'halted_at_boundary' on a command "
+                    f"declared cancel_semantics {declared!r}: only "
+                    "'between_steps' commands have boundaries (SPEC 8.3)"
+                )
     return VerificationResult(ok=not errors, errors=errors, warnings=warnings)

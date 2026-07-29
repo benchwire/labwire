@@ -17,7 +17,6 @@ Example:
 """
 
 import asyncio
-import contextlib
 import inspect
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -43,6 +42,7 @@ from labwire.core import (
 from pydantic import BaseModel, ConfigDict, create_model
 
 _POLL_S = 0.05
+_SETTLE_TIMEOUT_S = 5.0  # how long stop() gets to prove itself (SPEC 8.3)
 _STATUS_TIMEOUT_S = 300.0
 
 _PYTHON_TYPES: dict[str, type] = {
@@ -153,31 +153,54 @@ class OphydBridgeBase(Instrument):
         }
 
     async def _await_status(self, ctx: CommandContext, status: Any, what: str) -> None:
-        """Wait for an ophyd status, honoring cancellation and progress.
+        """Wait for an ophyd status, honoring cancellation honestly.
 
-        Cancellation calls ``device.stop()`` and ends the run immediately
-        rather than waiting for the status, because a stopped device is not
-        guaranteed to resolve its status (``ophyd.sim`` axes do not).
+        Cancellation reaches here only for commands declared
+        ``cancel_semantics: "abort"`` (the server refuses the rest). The
+        device's stop() is called ONCE, and then the record must earn its
+        claim: if the status object resolves unsuccessfully within the
+        settlement window, the halt is confirmed; if it resolves
+        successfully, completion won the race; if it never resolves, the
+        settlement is ``unconfirmed``, because a stop request returning is
+        not the same as motion stopping (SPEC-FINDINGS F10). The old
+        behavior here reported canceled "whether or not the device obeys
+        stop()", which is exactly the lie the field report indicted.
+        TODO-VERIFY: the abort path has only ever run against synthetic
+        test devices; EpicsMotor.stop() on a real IOC is unexercised.
         """
         waited = 0.0
+        stop_sent_at: float | None = None
+        stop_error: str | None = None
         while not bool(getattr(status, "done", False)):
-            if ctx.cancel_requested:
+            if ctx.cancel_requested and ctx.cancel_semantics == "abort" and stop_sent_at is None:
+                stop_sent_at = waited
                 stop = getattr(self._device, "stop", None)
                 if callable(stop):
-                    # Report the cancel whether or not the device obeys stop().
-                    with contextlib.suppress(Exception):
+                    try:
                         await asyncio.to_thread(stop, success=False)
-                raise CanceledError(f"{what} canceled by request")
+                    except Exception as exc:
+                        stop_error = f"stop() raised {type(exc).__name__}: {exc}"
+                else:
+                    stop_error = "device has no stop()"
+            if stop_sent_at is not None and waited - stop_sent_at >= _SETTLE_TIMEOUT_S:
+                raise CanceledError(
+                    f"{stop_error or 'stop() returned'} but the {what} status never "
+                    f"resolved within {_SETTLE_TIMEOUT_S} s; physical state unconfirmed"
+                )
             if waited >= _STATUS_TIMEOUT_S:
                 raise DeviceTimeoutError(f"{what} did not complete within {_STATUS_TIMEOUT_S} s")
             await ctx.sleep(_POLL_S)
             waited += _POLL_S
         if not bool(getattr(status, "success", True)):
+            if stop_sent_at is not None and stop_error is None:
+                ctx.confirm_halted(f"{what} status resolved unsuccessful after stop()")
             failure = None
             exception = getattr(status, "exception", None)
             if callable(exception):
                 failure = exception()
             raise HardwareFaultError(f"{what} failed: {failure or 'device reported no success'}")
+        # done and successful: fall through and return normally; if a cancel
+        # was pending, the server records ran_to_completion.
 
     async def _move(self, ctx: CommandContext, key: str, value: Any) -> dict[str, Any]:
         """Actuate a positioner through the device's own set()."""
@@ -264,6 +287,7 @@ def _make_mover(
     description: str,
     safety_class: str,
     units: dict[str, str],
+    cancel_semantics: str = "none",
 ) -> Callable[..., Awaitable[Any]]:
     """Build the positioner ``move`` coroutine."""
     python_type = _PYTHON_TYPES[resolved_component.dtype]
@@ -291,6 +315,7 @@ def _make_mover(
         units=units,
         returns_units={"value": resolved_component.unit},
         safety_class=cast("Any", safety_class),
+        cancel=cast("Any", cancel_semantics),
         description=description,
     )(move)
 
@@ -394,7 +419,11 @@ def OphydInstrument(
         if spec.name == "move" and spec.component_key:
             component = by_key[spec.component_key]
             namespace["move"] = _make_mover(
-                component, spec.description, spec.safety_class, {"value": component.unit}
+                component,
+                spec.description,
+                spec.safety_class,
+                {"value": component.unit},
+                cancel_semantics=spec.cancel_semantics,
             )
         elif spec.name.startswith("set_") and spec.component_key:
             component = by_key[spec.component_key]

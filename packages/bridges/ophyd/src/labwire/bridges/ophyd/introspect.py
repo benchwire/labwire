@@ -104,6 +104,7 @@ class DraftCommand(BaseModel):
     name: str
     description: str
     safety_class: SafetyClass
+    cancel_semantics: str = "none"
     component_key: str | None = None
     """The component a ``set_*`` command writes, if any."""
 
@@ -287,6 +288,26 @@ def _describe_component(
     )
 
 
+def is_epics_motor_family(device: object) -> bool:
+    """Whether the device descends from ophyd's EpicsMotor.
+
+    EpicsMotor.stop() writes the motor record's .STOP field, a real abort
+    path on real hardware, which is what earns the move command
+    cancel_semantics "abort". Everything else defaults to "none":
+    PositionerBase.stop() only marks the move done ("Sub-classes must
+    extend this method to _actually_ stop the device", its own docstring)
+    and ophyd.sim axes' stop() is literally ``pass``. Matching is by MRO
+    class identity, checked lazily so ophyd's EPICS layer is only
+    imported when such a device is actually bridged.
+    TODO-VERIFY: the abort classification has never been exercised
+    against a real EPICS IOC; only the classification logic is tested.
+    """
+    for klass in type(device).__mro__:
+        if klass.__name__ == "EpicsMotor" and klass.__module__.startswith("ophyd."):
+            return True
+    return False
+
+
 def _commands_for(device: object, components: list[DraftComponent]) -> list[DraftCommand]:
     """Default command surface and safety classes (SPEC §8.6).
 
@@ -318,6 +339,7 @@ def _commands_for(device: object, components: list[DraftComponent]) -> list[Draf
                     name="move",
                     description=("Move the device to a target position and wait for it to arrive."),
                     safety_class="S2",
+                    cancel_semantics="abort" if is_epics_motor_family(device) else "none",
                     component_key=primary.key,
                 )
             )
