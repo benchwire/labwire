@@ -85,7 +85,6 @@ def test_descriptor_composes_and_defaults() -> None:
                 title="Go",
                 description="Run.",
                 params_schema={"type": "object", "additionalProperties": False},
-                interruptible=False,
             )
         ],
         channels=[ChannelSpec(name="c", description="chan", dtype="float64", unit="g")],

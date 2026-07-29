@@ -19,7 +19,7 @@ from typing import Any, Self, cast
 from labwire.core._meta import MANIFEST_VERSION as MANIFEST_VERSION
 from labwire.core.capabilities import IdentityInfo
 from labwire.core.jcs import jcs_canonical
-from labwire.core.messages import CommandState
+from labwire.core.messages import Cancellation, CommandState
 from labwire.core.types import JsonRpcError
 from nacl.exceptions import BadSignatureError
 from nacl.signing import SigningKey as _NaclSigningKey
@@ -165,6 +165,7 @@ class Manifest(_M):
     run_id: str
     instrument: IdentityInfo
     command: ManifestCommand
+    cancellation: Cancellation | None = None
     status: CommandState
     authorization: ManifestAuthorization | None = None
     resource_revisions: list[ManifestResourceRevision] | None = None

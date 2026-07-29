@@ -525,15 +525,21 @@ async def test_a_gripper_move_to_a_container_is_a_kind_mismatch(
     assert caught.value.details["reason"] == "kind_mismatch"
 
 
-async def test_gripper_moves_are_not_interruptible(
+async def test_every_command_declares_none_cancel_semantics(
     served: tuple[LiquidHandler, LabwireClient],
 ) -> None:
+    """Each atomic PLR call is committed once issued (F10): none, everywhere.
+
+    The one exception, the bridge-sequenced transfer, earns between_steps
+    in the D3 milestone and is asserted separately there.
+    """
     _rig, client = served
     descriptor = await client.describe()
-    movers = {c.name: c.interruptible for c in descriptor.commands}
-    assert movers["move_plate"] is False
-    assert movers["move_lid"] is False
-    assert movers["move_resource"] is False
+    semantics = {c.name: c.cancel_semantics for c in descriptor.commands}
+    assert semantics["move_plate"] == "none"
+    assert semantics["move_lid"] == "none"
+    assert semantics["move_resource"] == "none"
+    assert semantics["aspirate"] == "none"
 
 
 async def test_the_manifest_of_a_granted_run_records_the_ceremony(

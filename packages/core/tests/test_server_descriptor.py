@@ -36,6 +36,7 @@ class Pump(Instrument):
         units={"volume_ul": "uL", "rate_ul_min": "uL/min"},
         returns_units={"dispensed_ul": "uL"},
         estimated_duration_s=30.0,
+        cancel="abort",
     )
     async def dispense(
         self, ctx: CommandContext, volume_ul: float, rate_ul_min: float = 100.0
@@ -43,7 +44,7 @@ class Pump(Instrument):
         """Dispense a volume of liquid at a controlled flow rate."""
         return {"dispensed_ul": volume_ul}
 
-    @command(interruptible=False, clears_interlocks=["over_pressure"])
+    @command(clears_interlocks=["over_pressure"])
     async def reset_pressure(self, ctx: CommandContext) -> dict[str, bool]:
         """Vent the line and clear the over-pressure interlock."""
         return {"cleared": True}
@@ -65,9 +66,9 @@ def test_descriptor_commands_carry_schema_units_and_metadata() -> None:
     assert dispense.params_schema["properties"]["rate_ul_min"]["default"] == 100.0
     assert dispense.unit_annotations == {"volume_ul": "uL", "rate_ul_min": "uL/min"}
     assert dispense.estimated_duration_s == 30.0
-    assert dispense.interruptible is True
+    assert dispense.cancel_semantics == "abort"
     reset = by_name["reset_pressure"]
-    assert reset.interruptible is False
+    assert reset.cancel_semantics == "none"
     assert reset.clears_interlocks == ["over_pressure"]
 
 

@@ -52,7 +52,7 @@ async def _handle(connection: ServerConnection) -> None:
         method = message.get("method")
         if method == "initialize":
             result: Any = {
-                "protocol_version": "0.3",
+                "protocol_version": "0.4",
                 "server_info": {"name": "broken", "version": "0"},
                 "capabilities": {},
             }
@@ -104,6 +104,6 @@ async def test_broken_server_still_passes_what_it_does_right(broken_url: str) ->
     """Failing everything would be as suspicious as passing everything."""
     report = await asyncio.wait_for(run_suite(broken_url, RunOptions()), timeout=30)
     statuses = _by_id(report)
-    assert statuses["core.initialize.negotiates_0_3"] is Status.PASSED
+    assert statuses["core.initialize.negotiates_0_4"] is Status.PASSED
     assert statuses["core.describe.descriptor_valid"] is Status.PASSED
     assert statuses["core.ping"] is Status.PASSED

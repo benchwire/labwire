@@ -53,12 +53,12 @@ class Stirrer(Instrument):
         """Fail with a hardware fault."""
         raise HardwareFaultError("rotor jammed")
 
-    @command()
+    @command(cancel="abort")
     async def stir_forever(self, ctx: CommandContext) -> dict[str, bool]:
-        """Stir until canceled."""
+        """Stir until canceled; the software loop is a genuine halt."""
         while not ctx.cancel_requested:  # noqa: ASYNC110 - polls the ctx cancel flag
             await asyncio.sleep(0.001)
-        return {"stopped": True}
+        ctx.confirm_halted("stir loop exited")
 
     @command()
     async def announce(self, ctx: CommandContext) -> None:

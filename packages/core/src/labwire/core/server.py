@@ -34,10 +34,11 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Concatenate, Protocol, cast
+from typing import Annotated, Any, ClassVar, Concatenate, NoReturn, Protocol, cast
 
 from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
+    CancelSemantics,
     ChannelSpec,
     CommandSpec,
     IdentityInfo,
@@ -67,6 +68,7 @@ from labwire.core.grants import GrantStore, GrantVerdict
 from labwire.core.jcs import jcs_canonical, params_digest
 from labwire.core.messages import (
     TERMINAL_STATES,
+    Cancellation,
     CommandIdParams,
     CommandState,
     CommandStatus,
@@ -318,16 +320,78 @@ class CommandContext:
         clock: Clock,
         emit_event: Callable[[str, EventSeverity, dict[str, Any]], None],
         report_progress: Callable[[float | None, str | None], Awaitable[None]],
+        cancel_semantics: CancelSemantics = "none",
     ) -> None:
         self._clock = clock
         self._emit_event = emit_event
         self._report_progress = report_progress
         self._cancel_requested = False
+        self._cancel_semantics: CancelSemantics = cancel_semantics
+        self._boundary_completed = 0
+        self._boundary_last: str | None = None
+        self._boundary_of: int | None = None
+        self._halt_detail: str | None = None
+        self._halt_confirmed = False
 
     @property
     def cancel_requested(self) -> bool:
         """True once ``command/cancel`` has been initiated for this run."""
         return self._cancel_requested
+
+    def boundary(self, name: str, of: int | None = None) -> None:
+        """Mark a step boundary of a ``between_steps`` command (SPEC §8.3).
+
+        Call it after each backend operation completes. If a cancel has
+        been accepted, the run settles here: this raises
+        :class:`CanceledError` and the terminal record says the run halted
+        at this boundary, naming ``name`` as the last completed step.
+
+        Raises:
+            RuntimeError: if the command did not declare
+                ``cancel="between_steps"``; that is a driver bug, not a
+                runtime condition.
+
+        Example:
+            >>> # await do_aspirate(); ctx.boundary("aspirate", of=2)
+            >>> # await do_dispense(); ctx.boundary("dispense", of=2)
+        """
+        if self._cancel_semantics != "between_steps":
+            raise RuntimeError(
+                "ctx.boundary() is only meaningful for commands declared "
+                f"cancel='between_steps'; this one declares {self._cancel_semantics!r}"
+            )
+        self._boundary_completed += 1
+        self._boundary_last = name
+        if of is not None:
+            self._boundary_of = of
+        if self._cancel_requested:
+            raise CanceledError(f"stopped at boundary after {name!r}")
+
+    def confirm_halted(self, detail: str = "backend confirmed the halt") -> NoReturn:
+        """Settle an ``abort`` command's cancel as a CONFIRMED halt.
+
+        Call it only after the backend positively confirmed the physical
+        stop; the terminal record then says ``halted``. Raising
+        :class:`CanceledError` without calling this settles the honest
+        alternative, ``unconfirmed``.
+
+        Raises:
+            RuntimeError: if the command did not declare ``cancel="abort"``.
+            CanceledError: always, once the halt is recorded.
+
+        Example:
+            >>> # if ctx.cancel_requested:
+            >>> #     await backend.stop(); await backend.wait_stopped()
+            >>> #     ctx.confirm_halted("spindle reports idle")
+        """
+        if self._cancel_semantics != "abort":
+            raise RuntimeError(
+                "ctx.confirm_halted() is only meaningful for commands declared "
+                f"cancel='abort'; this one declares {self._cancel_semantics!r}"
+            )
+        self._halt_confirmed = True
+        self._halt_detail = detail
+        raise CanceledError(detail)
 
     async def progress(self, fraction: float | None = None, message: str | None = None) -> None:
         """Push a ``running`` status notification with progress (SPEC §8.2)."""
@@ -624,7 +688,7 @@ def command[**P, R](
     returns_units: dict[str, str] | None = None,
     qudt_quantity_kind: dict[str, str] | None = None,
     safety_class: SafetyClass = "S1",
-    interruptible: bool = True,
+    cancel: CancelSemantics = "none",
     estimated_duration_s: float | None = None,
     clears_interlocks: list[str] | None = None,
 ) -> Callable[
@@ -701,7 +765,7 @@ def command[**P, R](
                 safety_class=safety_class,
                 returns_schema=returns_schema,
                 estimated_duration_s=estimated_duration_s,
-                interruptible=interruptible,
+                cancel_semantics=cancel,
                 clears_interlocks=clears_interlocks or [],
             )
         except PydanticValidationError as exc:
@@ -856,6 +920,46 @@ class _Run:
         self.authorization: GrantVerdict | None = None
         self.revisions_at_start: dict[str, str] = {}
         self.revisions_at_end: dict[str, str] = {}
+        self.cancel_requested_at: str | None = None
+        self.cancellation: Cancellation | None = None
+
+    def settle_cancellation(self, outcome: str, detail: str | None = None) -> None:
+        """Record what the accepted cancel actually did (SPEC §8.3)."""
+        self.cancellation = Cancellation.model_validate(
+            {
+                "requested_at": self.cancel_requested_at or "",
+                "outcome": outcome,
+                "detail": detail,
+            }
+        )
+
+    def settle_from_context(self, exc_detail: str) -> None:
+        """Settle from how the handler ended: boundary, confirmed, or not.
+
+        A between_steps handler that stopped at ctx.boundary() settles
+        halted_at_boundary with the boundary recorded; an abort handler
+        that called ctx.confirm_halted() settles halted; any other
+        CanceledError settles unconfirmed, because nobody confirmed the
+        physical state and the record must not pretend otherwise.
+        """
+        ctx = self.ctx
+        if ctx is not None and ctx._boundary_last is not None:  # pyright: ignore[reportPrivateUsage]
+            self.cancellation = Cancellation.model_validate(
+                {
+                    "requested_at": self.cancel_requested_at or "",
+                    "outcome": "halted_at_boundary",
+                    "boundary": {
+                        "completed_steps": ctx._boundary_completed,  # pyright: ignore[reportPrivateUsage]
+                        "of_steps": ctx._boundary_of,  # pyright: ignore[reportPrivateUsage]
+                        "last": ctx._boundary_last,  # pyright: ignore[reportPrivateUsage]
+                    },
+                    "detail": exc_detail,
+                }
+            )
+        elif ctx is not None and ctx._halt_confirmed:  # pyright: ignore[reportPrivateUsage]
+            self.settle_cancellation("halted", detail=ctx._halt_detail)  # pyright: ignore[reportPrivateUsage]
+        else:
+            self.settle_cancellation("unconfirmed", detail=exc_detail)
 
     def add_record(self, canonical: bytes) -> None:
         line = canonical + b"\n"
@@ -884,6 +988,7 @@ class _Run:
             progress=self.progress,
             result=self.result,
             error=self.error,
+            cancellation=self.cancellation,
             resource_revisions=changed or None,
         )
         return status.model_dump(mode="json", exclude_none=True)
@@ -1516,10 +1621,14 @@ class InstrumentServer:
             self.clock,
             self._emit_event,
             lambda fraction, message: self._report_progress(run, fraction, message),
+            cancel_semantics=run.meta.spec.cancel_semantics,
         )
         run.ctx = ctx
         if run.is_canceling():  # canceled before it ever started
             run.timestamps["started"] = rfc3339(self.clock.now())  # degenerate window
+            run.settle_cancellation(
+                "halted", detail="canceled before start; no operation was issued"
+            )
             self._finish(run, "canceled")
             return
         run.timestamps["started"] = rfc3339(self.clock.now())
@@ -1527,15 +1636,23 @@ class InstrumentServer:
         try:
             bound = getattr(self.instrument, run.meta.attr_name)
             result = await bound(ctx, **kwargs)
-        except CanceledError:
+        except CanceledError as exc:
+            run.settle_from_context(str(exc))
             self._cancel_terminal(run)
         except asyncio.CancelledError:
             if run.fail_reason is not None:
                 run.error = run.fail_reason.to_wire()
                 self._finish(run, "failed")
             else:
+                if run.is_canceling():
+                    run.settle_cancellation(
+                        "unconfirmed", detail="handler was terminated before settlement"
+                    )
                 self._cancel_terminal(run)
         except LabwireError as exc:
+            if run.is_canceling():
+                # Completion won the race, and completion was failure.
+                run.settle_cancellation("ran_to_completion")
             run.error = exc.to_wire()
             self._finish(run, "failed")
         except Exception:
@@ -1544,7 +1661,12 @@ class InstrumentServer:
             self._finish(run, "failed")
         else:
             if run.is_canceling():
-                self._finish(run, "canceled")
+                # SPEC 8.3: completion won the race. The terminal status is
+                # succeeded, and the cancellation block says a cancel was
+                # pending; reporting canceled would erase a completed action.
+                run.settle_cancellation("ran_to_completion")
+                run.result = _jsonable(result)
+                self._finish(run, "succeeded")
             else:
                 run.result = _jsonable(result)
                 self._finish(run, "succeeded")
@@ -1601,6 +1723,8 @@ class InstrumentServer:
             manifest["result"] = run.result
         if run.error is not None:
             manifest["error"] = run.error.model_dump(mode="json", exclude_none=True)
+        if run.cancellation is not None:
+            manifest["cancellation"] = run.cancellation.model_dump(mode="json", exclude_none=True)
         if run.meta.spec.safety_class == "S2":
             manifest["authorization"] = {"mode": "confirmation", "identity_verified": False}
         elif run.meta.spec.safety_class == "S3" and run.authorization is not None:
@@ -1666,9 +1790,17 @@ class InstrumentServer:
     def _cancel(self, params: dict[str, Any]) -> dict[str, Any]:
         run = self._get_run(params)
         if run.status in TERMINAL_STATES or run.status == "canceling":
-            raise NotCancelableError(f"run is {run.status}")
-        if run.status == "running" and not run.meta.spec.interruptible:
-            raise NotCancelableError(f"command {run.meta.spec.name!r} is not interruptible")
+            raise NotCancelableError(f"run is {run.status}", details={"state": run.status})
+        semantics = run.meta.spec.cancel_semantics
+        if run.status == "running" and semantics == "none":
+            # SPEC 8.3: refusal is the only honest answer. Accepting and
+            # ignoring would report a cancel the hardware never saw.
+            raise NotCancelableError(
+                f"command {run.meta.spec.name!r} is running and declares "
+                "cancel_semantics 'none': the operation is already committed",
+                details={"cancel_semantics": "none", "state": "running"},
+            )
+        run.cancel_requested_at = rfc3339(self.clock.now())
         if run.ctx is not None:
             run.ctx._cancel_requested = True  # pyright: ignore[reportPrivateUsage]
         self._transition(run, "canceling")

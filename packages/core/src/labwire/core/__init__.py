@@ -13,6 +13,7 @@ from labwire.core._meta import PROTOCOL_VERSION, __version__
 from labwire.core.capabilities import (
     CONFIRMATION_REQUIRED_CLASSES,
     KIND_REGISTRY,
+    CancelSemantics,
     ChannelSpec,
     CommandSpec,
     IdentityInfo,
@@ -54,6 +55,7 @@ from labwire.core.jcs import jcs_canonical, jcs_dumps, params_digest
 from labwire.core.messages import (
     MESSAGE_TYPES,
     Authorization,
+    Cancellation,
     CommandState,
     CommandStatus,
     EventNotification,
@@ -105,7 +107,9 @@ __all__ = [
     "Authorization",
     "AuthorizationRequiredError",
     "BusyError",
+    "CancelSemantics",
     "CanceledError",
+    "Cancellation",
     "ChannelSpec",
     "Clock",
     "CommandContext",

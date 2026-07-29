@@ -58,6 +58,9 @@ def valid_kind(name: str) -> bool:
     return name in KIND_REGISTRY
 
 
+CancelSemantics = Literal["abort", "between_steps", "none"]
+"""What command/cancel can honestly do to a running command (SPEC §8.3)."""
+
 CONFIRMATION_REQUIRED_CLASSES: frozenset[str] = frozenset({"S2", "S3"})
 """Classes whose submissions require a confirmation value (SPEC §8.6)."""
 
@@ -468,7 +471,7 @@ class CommandSpec(_SpecModel):
     safety_class: SafetyClass = "S1"
     returns_schema: dict[str, Any] | None = None
     estimated_duration_s: float | None = None
-    interruptible: bool
+    cancel_semantics: CancelSemantics = "none"
     clears_interlocks: list[str] = []
 
     @model_validator(mode="after")

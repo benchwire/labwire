@@ -69,8 +69,8 @@ class RawWire:
         response = await self.call(
             "initialize",
             {
-                "protocol_version": "0.3",
-                "client_info": {"name": "labwire-conformance", "version": "0.3.0"},
+                "protocol_version": "0.4",
+                "client_info": {"name": "labwire-conformance", "version": "0.4.0"},
                 "capabilities": {},
             },
             request_id,

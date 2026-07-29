@@ -55,16 +55,16 @@ class Rig(Instrument):
         """Add two numbers instantly."""
         return {"sum": a + b}
 
-    @command()
+    @command(cancel="abort")
     async def wait_for_release(self, ctx: CommandContext) -> dict[str, bool]:
-        """Run until released or canceled; polls the cancel flag."""
+        """Run until released or canceled; the wait loop genuinely halts."""
         while not self.release.is_set():
             if ctx.cancel_requested:
-                return {"finished": False}
+                ctx.confirm_halted("wait loop exited")
             await asyncio.sleep(0.001)
         return {"finished": True}
 
-    @command(interruptible=False)
+    @command()
     async def stubborn(self, ctx: CommandContext) -> dict[str, bool]:
         """Run until released; cannot be canceled."""
         await self.release.wait()
@@ -159,7 +159,7 @@ async def test_initialize_result_and_gating() -> None:
                 "capabilities": {},
             },
         )
-        assert result["protocol_version"] == "0.3"
+        assert result["protocol_version"] == "0.4"
         # resources and grants advertise False until the server implements
         # them (SPEC §6.1): a not-yet-implementing server must say so.
         assert result["capabilities"] == {
@@ -235,6 +235,8 @@ async def test_cancel_interruptible_run(connected: tuple[Rig, _Client]) -> None:
     assert reply["status"] == "canceling"
     terminal = await client.wait_terminal(submit["command_id"])
     assert terminal["status"] == "canceled"
+    assert terminal["cancellation"]["outcome"] == "halted"
+    assert terminal["cancellation"]["requested_at"]
 
 
 async def test_cancel_unknown_id_is_validation_error(connected: tuple[Rig, _Client]) -> None:

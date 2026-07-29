@@ -89,6 +89,23 @@ def verify(bundle: Path) -> None:
     )
     typer.echo(f"  command:    {manifest.command.name} {json.dumps(manifest.command.params)}")
     typer.echo(f"  status:     {manifest.status}")
+    if manifest.cancellation is not None:
+        settled = manifest.cancellation
+        line = f"  cancel:     {settled.outcome}"
+        if settled.boundary is not None:
+            of_steps = settled.boundary.of_steps if settled.boundary.of_steps is not None else "?"
+            line += (
+                f" after {settled.boundary.last!r} "
+                f"({settled.boundary.completed_steps}/{of_steps} steps)"
+            )
+        if settled.detail:
+            line += f": {settled.detail}"
+        typer.echo(line)
+        if settled.outcome == "unconfirmed":
+            typer.echo(
+                "              the backend never confirmed the physical stop; "
+                "treat the instrument state as unknown until observed"
+            )
     if manifest.command.safety_class is not None:
         typer.echo(f"  class:      {manifest.command.safety_class}")
     if manifest.authorization is not None:
@@ -100,11 +117,12 @@ def verify(bundle: Path) -> None:
         else:
             typer.echo(f"  authorized: {auth.mode}")
         # The honesty caveat as a machine-checkable wire fact (SPEC 13.1):
-        # a v0.3 bundle claiming identity was verified is not a v0.3 bundle.
-        if manifest.manifest_version == "0.3" and auth.identity_verified:
+        # no current manifest version can claim verified operator identity.
+        if manifest.manifest_version in ("0.3", "0.4") and auth.identity_verified:
             typer.echo(
-                "error: identity_verified is true in a 0.3 manifest; v0.3 proves "
-                "deployment policy and parameter binding, NOT operator identity",
+                f"error: identity_verified is true in a {manifest.manifest_version} "
+                "manifest; these versions prove deployment policy and parameter "
+                "binding, NOT operator identity",
                 err=True,
             )
             raise typer.Exit(1)

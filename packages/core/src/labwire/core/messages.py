@@ -109,6 +109,23 @@ class Progress(_Msg):
     message: str | None = None
 
 
+class CancellationBoundary(_Msg):
+    """The last completed step of a between_steps cancellation (SPEC §8.3)."""
+
+    completed_steps: int
+    of_steps: int | None = None
+    last: str
+
+
+class Cancellation(_Msg):
+    """Settlement of an accepted cancel: what actually happened (SPEC §8.3)."""
+
+    requested_at: str
+    outcome: Literal["halted", "halted_at_boundary", "ran_to_completion", "unconfirmed"]
+    boundary: CancellationBoundary | None = None
+    detail: str | None = None
+
+
 class ResourceRevision(_Msg):
     """One resource's revision after a run changed it (SPEC §8.2)."""
 
@@ -124,6 +141,7 @@ class CommandStatus(_Msg):
     progress: Progress | None = None
     result: Any = None
     error: JsonRpcError | None = None
+    cancellation: Cancellation | None = None
     resource_revisions: list[ResourceRevision] | None = None
 
 

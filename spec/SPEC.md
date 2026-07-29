@@ -1489,7 +1489,7 @@ otherwise.
           "required": ["dispensed_ul"]
         },
         "estimated_duration_s": 30.0,
-        "interruptible": true
+        "cancel_semantics": "abort"
       },
       {
         "name": "abort",
@@ -1499,7 +1499,6 @@ otherwise.
         "unit_annotations": {},
         "returns_units": {},
         "safety_class": "S0",
-        "interruptible": false,
         "clears_interlocks": ["over_pressure"]
       }
     ],
@@ -1595,7 +1594,7 @@ together; a fragment of a liquid handler's descriptor:
         "unit_annotations": { "volumes_ul": "uL" },
         "returns_units": { "total_volume_ul": "uL" },
         "safety_class": "S2",
-        "interruptible": true
+        "cancel_semantics": "between_steps"
       }
     ],
     "channels": [],

@@ -217,7 +217,7 @@ def test_descriptor_from_the_wire_is_rejected_when_units_are_missing() -> None:
                     "properties": {"ml": {"type": "number"}},
                 },
                 "unit_annotations": {},
-                "interruptible": True,
+                "cancel_semantics": "none",
             }
         )
 
@@ -235,7 +235,7 @@ def test_empty_unit_string_is_not_a_unit() -> None:
                     "properties": {"ml": {"type": "number"}},
                 },
                 "unit_annotations": {"ml": "  "},
-                "interruptible": True,
+                "cancel_semantics": "none",
             }
         )
 

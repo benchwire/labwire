@@ -629,7 +629,7 @@ def PyLabRobotInstrument(
             estimated_duration_s=(override.estimated_duration_s if override else None),
             # A plate held in the gripper mid-traverse has no safe interruption;
             # command/cancel on these returns -32007 instead (SPEC 8.3).
-            interruptible=spec.name not in {"move_plate", "move_lid", "move_resource"},
+            cancel="none",  # every atomic PLR call is committed once issued (F10)
         )(implementation)
 
     generated = type("PyLabRobot_LiquidHandler", (PyLabRobotBridge,), namespace)

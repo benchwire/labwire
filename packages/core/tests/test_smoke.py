@@ -6,4 +6,4 @@ def test_version_is_set() -> None:
 
 
 def test_protocol_version() -> None:
-    assert PROTOCOL_VERSION == "0.3"
+    assert PROTOCOL_VERSION == "0.4"

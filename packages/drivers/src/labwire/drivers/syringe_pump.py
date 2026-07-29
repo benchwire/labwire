@@ -30,6 +30,7 @@ from labwire.drivers._lineproto import LineProtocolClient
 from pydantic import BaseModel, ConfigDict
 
 _POLL_S = 0.02
+_SETTLE_POLLS = 50  # settlement window: how long STP gets to prove itself
 
 
 class SyringeInfo(BaseModel):
@@ -156,6 +157,7 @@ class SyringePump(Instrument):
         returns_units={"dispensed_ul": "uL"},
         qudt_quantity_kind={"volume_ul": "Volume", "rate_ul_min": "VolumeFlowRate"},
         safety_class="S2",  # consumes reagent: irreversible (SPEC §8.6)
+        cancel="abort",  # the pump protocol has a real stop (STP), confirmed below
         estimated_duration_s=60.0,
     )
     async def dispense(
@@ -182,8 +184,21 @@ class SyringePump(Instrument):
                 self.syringe.touch()
                 return {"dispensed_ul": dispensed}
             if ctx.cancel_requested:
+                # SPEC 8.3: the pump has a real stop (STP), but sending it is
+                # not the same as the motor stopping. Confirm before claiming.
                 await self._cmd("STP")
-                raise CanceledError("dispense stopped by cancel")
+                for _ in range(_SETTLE_POLLS):
+                    state, _rate, dispensed = self._parse_status(await self._cmd("STAT?"))
+                    if state == "IDLE":
+                        self.flow_rate.publish(0.0)
+                        self.dispensed.publish(dispensed)
+                        self._dispensed_total += dispensed
+                        self.syringe.touch()
+                        ctx.confirm_halted(
+                            f"pump reports IDLE after STP; {dispensed:.2f} uL had been dispensed"
+                        )
+                    await ctx.sleep(_POLL_S)
+                raise CanceledError("STP sent; pump never reported IDLE within the window")
             await ctx.progress(min(dispensed / volume_ul, 1.0))
             await ctx.sleep(_POLL_S)
 

@@ -9,12 +9,12 @@ from typing import Any
 import pytest
 from labwire.bridges.ophyd import AnnotationFile, OphydInstrument
 from labwire.core import (
-    CanceledError,
     ConfirmationRequiredError,
     HardwareFaultError,
     InstrumentServer,
     LabwireClient,
     MemoryTransport,
+    NotCancelableError,
     verify_bundle,
 )
 from ophyd import Component as Cpt
@@ -143,18 +143,24 @@ async def test_telemetry_streams_the_read_channels(
         assert isinstance(sample.value, float)
 
 
-async def test_cancel_stops_the_device_and_ends_the_run(
+async def test_cancel_on_a_sim_axis_move_is_refused(
     axis: tuple[SynAxis, LabwireClient],
 ) -> None:
+    """ophyd.sim's stop() is literally ``pass``: the sim move completes no
+    matter what, so the honest declaration is cancel_semantics none and
+    the honest answer to cancel is refusal (SPEC 8.3, F10).
+    """
     device = SynAxis(name="slow", delay=2.0)
     annotations = json.loads(json.dumps(AXIS_ANNOTATIONS))
     server, client = await _serve(device, annotations)
     try:
         handle = await client.submit("move", {"value": 50.0}, confirmation=GRANT)
         await asyncio.sleep(0.2)
-        await handle.cancel()
-        with pytest.raises(CanceledError):
-            await handle.result(timeout=20.0)
+        with pytest.raises(NotCancelableError) as caught:
+            await handle.cancel()
+        assert caught.value.details == {"cancel_semantics": "none", "state": "running"}
+        result = await handle.result(timeout=20.0)
+        assert result["value"] == 50.0
     finally:
         await client.close()
         await server.aclose()

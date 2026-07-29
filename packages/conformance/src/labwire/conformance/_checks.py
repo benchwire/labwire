@@ -135,15 +135,15 @@ async def _expect_refusal(
 
 
 async def check_initialize_negotiates(ctx: CheckContext) -> str:
-    """SPEC 4/6.1: the handshake succeeds and the server speaks 0.3."""
+    """SPEC 4/6.1: the handshake succeeds and the server speaks 0.4."""
     async with RawWire(ctx.url) as wire:
         response = await wire.initialize()
         result = response.get("result")
         if not isinstance(result, dict):
             raise CheckFailed(f"initialize returned {response!r}, not a result object")
         version = result.get("protocol_version")
-        if version != "0.3":
-            raise CheckFailed(f"server negotiated protocol_version {version!r}, expected '0.3'")
+        if version != "0.4":
+            raise CheckFailed(f"server negotiated protocol_version {version!r}, expected '0.4'")
         for key in ("server_info", "capabilities"):
             if key not in result:
                 raise CheckFailed(f"initialize result is missing {key!r}")
@@ -392,6 +392,47 @@ async def check_unknown_reference_refused(ctx: CheckContext) -> str:
     return ""
 
 
+async def check_cancel_semantics_declared(ctx: CheckContext) -> str:
+    """SPEC 8.3: any declared cancel_semantics is one of the three values."""
+    valid = {"abort", "between_steps", "none"}
+    problems = [
+        f"{raw.get('name', '?')}: {raw.get('cancel_semantics')!r}"
+        for raw in ctx.raw_descriptor.get("commands", [])
+        if "cancel_semantics" in raw and raw.get("cancel_semantics") not in valid
+    ]
+    if problems:
+        raise CheckFailed("invalid cancel_semantics: " + "; ".join(problems[:3]))
+    declared = sum(1 for raw in ctx.raw_descriptor.get("commands", []) if "cancel_semantics" in raw)
+    return f"{declared} command(s) declare cancel semantics; the rest default to none"
+
+
+async def check_cancel_terminal_refused(ctx: CheckContext) -> str:
+    """SPEC 8.3: cancelling a terminal run is refused -32007, never accepted.
+
+    Rides the exercised run so nothing extra ever executes; a mid-run
+    refusal on a running none command needs a test deployment and is
+    proven by the reference test suite instead.
+    """
+    if ctx.exercised_command_id is None:
+        raise Unexercised("rides the exercised run; pass --exercise")
+    async with RawWire(ctx.url) as wire:
+        await wire.initialize()
+        response = await wire.call(
+            "command/cancel", {"command_id": ctx.exercised_command_id}, request_id=31
+        )
+    error = response.get("error")
+    if not isinstance(error, dict):
+        raise CheckFailed("cancelling a terminal run was accepted")
+    if error.get("code") != -32007:
+        raise CheckFailed(
+            f"cancel of a terminal run refused with {error.get('code')}; SPEC requires -32007"
+        )
+    details = (error.get("data") or {}).get("details") or {}
+    if not details.get("state"):
+        raise CheckFailed("the -32007 refusal does not name the run's state in details")
+    return ""
+
+
 # --- streaming -------------------------------------------------------------
 
 
@@ -487,7 +528,7 @@ class Check:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("core.initialize.negotiates_0_3", "SPEC 4, 6.1", "core", check_initialize_negotiates),
+    Check("core.initialize.negotiates_0_4", "SPEC 4, 6.1", "core", check_initialize_negotiates),
     Check("core.initialize.required_first", "SPEC 6.2", "core", check_initialize_required),
     Check("core.jsonrpc.parse_error_recovery", "SPEC 12", "core", check_parse_error_recovery),
     Check("core.jsonrpc.method_not_found", "SPEC 12", "core", check_method_not_found),
@@ -504,6 +545,8 @@ CHECKS: tuple[Check, ...] = (
         "references.unknown_ref_refused", "SPEC 7.2, 10.4", "core", check_unknown_reference_refused
     ),
     Check("core.lifecycle.exercise", "SPEC 8", "core", check_lifecycle_exercise),
+    Check("cancel.semantics_declared", "SPEC 8.3", "core", check_cancel_semantics_declared),
+    Check("cancel.terminal_refused", "SPEC 8.3", "core", check_cancel_terminal_refused),
     Check("streaming.telemetry_subscribe", "SPEC 9", "streaming", check_telemetry_subscribe),
     Check("streaming.events_subscribe", "SPEC 11", "streaming", check_events_subscribe),
     Check("signed.bundle_verifies", "SPEC 13", "signed", check_bundle_verifies),

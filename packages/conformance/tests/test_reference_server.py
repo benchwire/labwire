@@ -56,7 +56,7 @@ async def test_report_json_round_trips(rig_url: tuple[str, Path]) -> None:
     payload = json.loads(report.to_json())
     assert payload["instrument"] == "ConformanceRig-1"
     assert {c["id"] for c in payload["checks"]} >= {
-        "core.initialize.negotiates_0_3",
+        "core.initialize.negotiates_0_4",
         "core.describe.units_mandatory",
         "signed.tamper_detected",
     }
