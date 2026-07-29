@@ -11,6 +11,7 @@ Example:
     >>> # server = build_server(instruments)
 """
 
+import asyncio
 import json
 import re
 import secrets
@@ -18,6 +19,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import labwire.mcp.tasks as task_ext
 from labwire.core import CommandSpec, InstrumentDescriptor, LabwireClient, LabwireError
 
 from mcp import MCPError
@@ -230,10 +232,17 @@ def _era_is_modern(ctx: ServerRequestContext[Any, Any]) -> bool:
     return not ctx.protocol_version.startswith(_LEGACY_ERA_PREFIX)
 
 
+def _client_declares_tasks(ctx: ServerRequestContext[Any, Any]) -> bool:
+    capabilities = ctx.session.client_capabilities
+    extensions = cast("dict[str, Any]", getattr(capabilities, "extensions", None) or {})
+    return task_ext.EXTENSION_ID in extensions
+
+
 def build_server(
     instruments: list[ConnectedInstrument],
     *,
     s2_confirmation: str | None = None,
+    task_threshold_s: float = 10.0,
 ) -> Server[Any]:
     """Build an MCP server exposing every instrument command as a tool.
 
@@ -251,6 +260,7 @@ def build_server(
         >>> # server = build_server(instruments)
     """
     pending: dict[str, _PendingApproval] = {}
+    tasks = task_ext.TaskStore()
 
     async def list_tools(
         ctx: ServerRequestContext[Any, Any], params: PaginatedRequestParams | None
@@ -344,7 +354,7 @@ def build_server(
 
     async def call_tool(
         ctx: ServerRequestContext[Any, Any], params: CallToolRequestParams
-    ) -> CallToolResult | InputRequiredResult:
+    ) -> CallToolResult | InputRequiredResult | task_ext.CreateTaskWire:
         name = params.name
         arguments = dict(params.arguments or {})
         for instrument in instruments:
@@ -354,11 +364,57 @@ def build_server(
             spec = instrument.commands.get(name)
             if spec is not None:
                 return await _run_command(
-                    ctx, instrument, spec, name, params, pending, s2_confirmation
+                    ctx,
+                    instrument,
+                    spec,
+                    name,
+                    params,
+                    pending,
+                    s2_confirmation,
+                    tasks=tasks,
+                    task_threshold_s=task_threshold_s,
                 )
         raise MCPError(code=INVALID_PARAMS, message=f"unknown tool: {name}")
 
-    return Server(
+    async def tasks_get(
+        ctx: ServerRequestContext[Any, Any], params: task_ext.TaskIdParams
+    ) -> task_ext.TaskDetailWire:
+        del ctx
+        return task_ext.detail_wire(tasks.get(params.task_id))
+
+    async def tasks_update(
+        ctx: ServerRequestContext[Any, Any], params: task_ext.TaskUpdateParams
+    ) -> task_ext.TaskAckWire:
+        del ctx
+        # Approvals resolve BEFORE a task is created here (the input_required
+        # round happens on the original tools/call), so no task of ours is
+        # ever input_required; the spec says to ignore unknown or
+        # already-answered keys, which is everything.
+        tasks.get(params.task_id)
+        return task_ext.TaskAckWire()
+
+    async def tasks_cancel(
+        ctx: ServerRequestContext[Any, Any], params: task_ext.TaskIdParams
+    ) -> task_ext.TaskAckWire:
+        del ctx
+        record = tasks.get(params.task_id)
+        # Cooperative by spec: the ack promises nothing. cancel_semantics
+        # "none" acks and keeps working, exactly as the extension allows.
+        record.cancel_requested = True
+        if record.status == "working" and record.cancel_semantics != "none":
+            if record.labwire_cancel is not None:
+                await record.labwire_cancel()
+                record.status_message = "canceling: settlement pending (SPEC 8.3)"
+                record.touch()
+        elif record.status == "working":
+            record.status_message = (
+                "cancel acknowledged and refused: this command declares "
+                "cancel_semantics 'none' and runs to completion"
+            )
+            record.touch()
+        return task_ext.TaskAckWire()
+
+    server = Server(
         name="labwire",
         # Tool and resource surfaces are fixed for the life of the process
         # (they derive from the configured instruments), so lists cache
@@ -370,10 +426,20 @@ def build_server(
             "resources/read": CacheHint(ttl_ms=0, scope="private"),
         },
         on_list_tools=list_tools,
-        on_call_tool=call_tool,
+        # The SDK's on_call_tool annotation predates result-claiming
+        # extensions; the runner serializes any Result, and CreateTaskWire
+        # only ever goes to clients that declared the tasks extension.
+        on_call_tool=cast("Any", call_tool),
         on_list_resources=list_resources,
         on_read_resource=read_resource,
     )
+    # SEP-2133: advertise and serve the tasks extension (2026-era only; the
+    # SDK does not implement it, so these are our own handlers).
+    server.extensions[task_ext.EXTENSION_ID] = {}
+    server.add_request_handler("tasks/get", task_ext.TaskIdParams, tasks_get)
+    server.add_request_handler("tasks/update", task_ext.TaskUpdateParams, tasks_update)
+    server.add_request_handler("tasks/cancel", task_ext.TaskIdParams, tasks_cancel)
+    return server
 
 
 def _ok(text: str) -> CallToolResult:
@@ -463,7 +529,10 @@ async def _run_command(
     params: CallToolRequestParams,
     pending: dict[str, _PendingApproval],
     s2_confirmation: str | None,
-) -> CallToolResult | InputRequiredResult:
+    *,
+    tasks: task_ext.TaskStore,
+    task_threshold_s: float,
+) -> CallToolResult | InputRequiredResult | task_ext.CreateTaskWire:
     arguments = dict(params.arguments or {})
 
     # --- resume an input_required round (modern era only) -------------------
@@ -519,6 +588,15 @@ async def _run_command(
             request_state=token,
         )
 
+    # --- long-running commands become tasks (extension opt-in only) ---------
+    if (
+        spec.estimated_duration_s is not None
+        and spec.estimated_duration_s >= task_threshold_s
+        and _era_is_modern(ctx)
+        and _client_declares_tasks(ctx)
+    ):
+        return await _start_task(instrument, spec, arguments, tasks)
+
     outcome = await _submit(instrument, spec, arguments)
 
     # --- S3: turn the refusal into a client-surfaced grant entry ------------
@@ -544,6 +622,107 @@ async def _run_command(
     if isinstance(outcome, dict):
         return _tool_error(outcome)
     return _ok(outcome)
+
+
+async def _start_task(
+    instrument: ConnectedInstrument,
+    spec: CommandSpec,
+    arguments: dict[str, Any],
+    tasks: task_ext.TaskStore,
+) -> task_ext.CreateTaskWire:
+    """Run one command as a task: durably registered before the reply.
+
+    The runner mirrors _submit but keeps the record honest along the way:
+    accepted/running/canceling all surface as "working" (the extension has
+    no finer states), instrument failures land as completed with
+    is_error inside the CallToolResult (task "failed" is JSON-RPC only),
+    and a client cancel that really cancelled the run ends "cancelled"
+    with the settlement summarized in statusMessage, because a cancelled
+    task carries no result field.
+    """
+    record = tasks.create(
+        cancel_semantics=spec.cancel_semantics,
+        message=f"running {spec.name!r} on {instrument.descriptor.identity.model}",
+    )
+
+    payload = dict(arguments)
+    confirmation = payload.pop("confirmation", None)
+    authorization = cast("dict[str, Any] | None", payload.pop("authorization", None))
+    grant_id = authorization.get("grant_id") if isinstance(authorization, dict) else None
+
+    async def run() -> None:
+        try:
+            handle = await instrument.client.submit(
+                spec.name,
+                payload,
+                confirmation=str(confirmation) if confirmation is not None else None,
+                authorization=str(grant_id) if grant_id is not None else None,
+            )
+
+            async def cancel_now() -> None:
+                try:
+                    await handle.cancel()
+                except LabwireError as exc:
+                    record.status_message = f"cancel refused by the instrument: {exc}"
+                    record.touch()
+
+            record.labwire_cancel = cancel_now
+            if record.cancel_requested and spec.cancel_semantics != "none":
+                # A tasks/cancel raced ahead of submit registration; honor it
+                # now that the run exists.
+                await cancel_now()
+                record.status_message = "canceling: settlement pending (SPEC 8.3)"
+                record.touch()
+            timeout = (
+                spec.estimated_duration_s * 5.0
+                if spec.estimated_duration_s is not None
+                else _DEFAULT_TIMEOUT_S
+            )
+            try:
+                result = await handle.result(timeout=timeout)
+            except LabwireError as exc:
+                status = await handle.status()
+                if status.status == "canceled" and record.cancel_requested:
+                    block = status.cancellation
+                    outcome = block.outcome if block is not None else "unknown"
+                    record.status = "cancelled"
+                    record.status_message = (
+                        f"cancelled; settlement: {outcome}. The signed run bundle "
+                        f"for {handle.command_id} is retained on the instrument host."
+                    )
+                else:
+                    # Instrument-level failure: completed + is_error, because
+                    # task "failed" is reserved for JSON-RPC faults.
+                    record.status = "completed"
+                    record.result = _tool_error(
+                        {
+                            "error": str(exc),
+                            "category": exc.category,
+                            "retryable": exc.retryable,
+                            "details": exc.details,
+                            "command_id": handle.command_id,
+                        }
+                    )
+                    record.status_message = f"finished with {exc.category}"
+                record.touch()
+                return
+            terminal = await handle.status()
+            body: dict[str, Any] = {"result": result, "command_id": handle.command_id}
+            if terminal.cancellation is not None:
+                body["cancellation"] = terminal.cancellation.model_dump(
+                    mode="json", exclude_none=True
+                )
+            record.status = "completed"
+            record.result = _ok(json.dumps(body))
+            record.status_message = f"succeeded; signed bundle {handle.command_id}"
+            record.touch()
+        except Exception as exc:
+            record.status = "failed"
+            record.error = {"code": -32603, "message": f"adapter failure: {exc}"}
+            record.touch()
+
+    record.runner = asyncio.ensure_future(run())
+    return task_ext.create_wire(record)
 
 
 async def _submit(

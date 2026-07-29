@@ -217,3 +217,165 @@ async def test_legacy_era_keeps_the_parameter_path(pump_url: str) -> None:
         )
         assert outcome.is_error
         assert "confirmation" in _text(outcome.content)
+
+
+# --- tasks extension (io.modelcontextprotocol/tasks), 2026-07-28 only --------
+
+
+from typing import Literal  # noqa: E402
+
+
+class _TaskWire(  # what the CLIENT sees in a claimed "task" result
+    __import__("mcp_types").Result
+):
+    result_type: Literal["task"] = "task"
+    task_id: str
+    status: str
+    ttl_ms: int | None = None
+    poll_interval_ms: int | None = None
+    status_message: str | None = None
+
+
+def _tasks_client_extension(
+    observed: dict[str, Any], *, cancel_after_poll: bool = False, probe_bogus: bool = False
+) -> Any:
+    from mcp import MCPError
+    from mcp.client.extension import ClaimContext, ClientExtension, ResultClaim
+    from mcp.types import CallToolResult as ClientCallToolResult
+    from mcp_types import Request
+
+    class LabwireTasks(ClientExtension):
+        identifier = "io.modelcontextprotocol/tasks"
+
+        def claims(self) -> Any:
+            return [ResultClaim(result_type="task", model=_TaskWire, resolve=self._resolve)]
+
+        async def _resolve(self, claimed: _TaskWire, ctx: ClaimContext) -> ClientCallToolResult:
+            observed["task_id"] = claimed.task_id
+            observed["initial_status"] = claimed.status
+            if probe_bogus:
+                try:
+                    await ctx.session.send_request(
+                        Request(method="tasks/get", params=_ClientTaskParams(task_id="task-nope")),
+                        _TaskDetail,
+                    )
+                except MCPError as exc:
+                    observed["bogus_error"] = str(exc)
+            polls = 0
+            while True:
+                detail = await ctx.session.send_request(
+                    Request(method="tasks/get", params=_ClientTaskParams(task_id=claimed.task_id)),
+                    _TaskDetail,
+                )
+                observed.setdefault("statuses", []).append(detail.status)
+                polls += 1
+                if cancel_after_poll and polls == 1:
+                    await ctx.session.send_request(
+                        Request(
+                            method="tasks/cancel", params=_ClientTaskParams(task_id=claimed.task_id)
+                        ),
+                        __import__("mcp_types").Result,
+                    )
+                    observed["cancel_acked"] = True
+                if detail.status in ("completed", "failed", "cancelled"):
+                    observed["final"] = detail.model_dump(mode="json", by_alias=True)
+                    if detail.status == "completed" and detail.result is not None:
+                        return ClientCallToolResult.model_validate(detail.result)
+                    return ClientCallToolResult(content=[], is_error=detail.status == "failed")
+                await asyncio.sleep((detail.poll_interval_ms or 100) / 1000.0)
+
+    return LabwireTasks()
+
+
+class _ClientTaskParams(__import__("mcp_types").RequestParams):
+    task_id: str
+
+
+class _TaskDetail(__import__("mcp_types").Result):
+    result_type: str = "complete"
+    task_id: str
+    status: str
+    status_message: str | None = None
+    ttl_ms: int | None = None
+    poll_interval_ms: int | None = None
+    result: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+
+import asyncio  # noqa: E402
+
+
+@asynccontextmanager
+async def tasks_session(url: str, extension: Any) -> AsyncGenerator[Client]:
+    instruments = await connect_instruments([url])
+    try:
+        server = build_server(instruments)
+        async with Client(server, mode="2026-07-28", extensions=[extension]) as client:
+            yield client
+    finally:
+        for instrument in instruments:
+            await instrument.client.close()
+
+
+async def test_long_command_becomes_a_task_and_completes(pump_url: str) -> None:
+    """dispense (estimated 60 s) task-wraps for a declaring client; the
+    resolver polls tasks/get and the final result carries the run."""
+    observed: dict[str, Any] = {}
+    async with tasks_session(pump_url, _tasks_client_extension(observed)) as session:
+        outcome = await session.call_tool(
+            "SimPump-200__dispense",
+            {"volume_ul": 60.0, "rate_ul_min": 60000.0, "confirmation": GRANT},
+        )
+    assert observed["task_id"].startswith("task-")
+    assert observed["initial_status"] == "working"
+    assert observed["final"]["status"] == "completed"
+    assert not outcome.is_error
+    payload = json.loads(_text(outcome.content))
+    assert payload["result"]["dispensed_ul"] == pytest.approx(60.0, rel=0.05)
+    assert "command_id" in payload  # the signed bundle reference rides along
+
+
+async def test_task_cancel_on_abort_command_settles_honestly(pump_url: str) -> None:
+    """tasks/cancel on the abort-declared dispense really cancels: the task
+    ends cancelled with the settlement summarized (a cancelled task cannot
+    carry a result, so the statusMessage names the outcome and bundle)."""
+    observed: dict[str, Any] = {}
+    async with tasks_session(
+        pump_url, _tasks_client_extension(observed, cancel_after_poll=True)
+    ) as session:
+        outcome = await session.call_tool(
+            "SimPump-200__dispense",
+            {"volume_ul": 50000.0, "rate_ul_min": 6000.0, "confirmation": GRANT},
+        )
+    assert observed["cancel_acked"] is True
+    final = observed["final"]
+    assert final["status"] in ("cancelled", "completed")  # cancel can lose the race
+    if final["status"] == "cancelled":
+        assert "settlement" in (final.get("statusMessage") or "")
+        assert outcome.content == []
+    del outcome
+
+
+async def test_non_declaring_client_never_sees_a_task(pump_url: str) -> None:
+    """Spec MUST: no CreateTaskResult without the per-request capability."""
+    async with mcp_session(pump_url, "2026-07-28") as session:
+        outcome = await session.call_tool(
+            "SimPump-200__dispense",
+            {"volume_ul": 60.0, "rate_ul_min": 60000.0, "confirmation": GRANT},
+        )
+        assert not outcome.is_error
+        payload = json.loads(_text(outcome.content))
+        assert "dispensed_ul" in payload  # a plain CallToolResult, no task
+
+
+async def test_unknown_task_id_is_invalid_params(pump_url: str) -> None:
+    """Spec: unknown/expired taskId on tasks/get is -32602."""
+    observed: dict[str, Any] = {}
+    async with tasks_session(
+        pump_url, _tasks_client_extension(observed, probe_bogus=True)
+    ) as session:
+        await session.call_tool(
+            "SimPump-200__dispense",
+            {"volume_ul": 60.0, "rate_ul_min": 60000.0, "confirmation": GRANT},
+        )
+    assert "unknown or expired task" in observed["bogus_error"]
