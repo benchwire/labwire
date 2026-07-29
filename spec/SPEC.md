@@ -1,7 +1,7 @@
 # Labwire Protocol Specification
 
-**Version:** 0.3.0 (Draft)
-**Protocol version string:** `"0.3"`
+**Version:** 0.4.0 (Draft)
+**Protocol version string:** `"0.4"`
 **Date:** 2026-07-27
 **License:** Apache-2.0
 
@@ -14,8 +14,12 @@ agents, both human-operated software and autonomous AI systems, a universal
 way to **discover** an instrument's capabilities, **command** it, **stream**
 its measurements, and receive **cryptographically signed** records of what was
 done. The protocol is JSON-RPC 2.0 over WebSocket or stdio, with a capability
-discovery model inspired by the Model Context Protocol (MCP). Version 0.3
-adds three things v0.2 could not express: **resources** (addressable, typed,
+discovery model inspired by the Model Context Protocol (MCP). Version 0.4
+makes cancellation honest: commands declare what cancel can physically do
+(`cancel_semantics`, §8.3), acknowledgment is distinguished from
+settlement, and a cancelled run's signed record states what actually
+happened, including the case where nobody can confirm it. Version 0.3
+added three things v0.2 could not express: **resources** (addressable, typed,
 readable instrument state, such as a liquid handler's deck), **typed
 references** (parameters that name a resource item rather than carrying an
 uninterpreted string), and **operator grants** (an S3 authorization an agent
@@ -108,7 +112,7 @@ state → read telemetry → repeat → disconnect.
 ## 4. Versioning & Negotiation
 
 The protocol version is a string of the form `"MAJOR.MINOR"`. This document
-specifies protocol version `"0.3"`.
+specifies protocol version `"0.4"`.
 
 - The client states its protocol version in `initialize`.
 - The server replies with the protocol version **it will speak**: the highest
@@ -117,10 +121,10 @@ specifies protocol version `"0.3"`.
   MUST close the connection.
 - Servers SHOULD accept any client version that shares their MAJOR version.
   For MAJOR version 0, the MINOR version carries compatibility significance:
-  servers SHOULD reply with exactly `"0.3"` if they implement this document.
+  servers SHOULD reply with exactly `"0.4"` if they implement this document.
 
 The specification document itself is versioned `MAJOR.MINOR.PATCH`
-(this document: 0.3.0); PATCH revisions never change the wire protocol.
+(this document: 0.4.0); PATCH revisions never change the wire protocol.
 
 ## 5. Transports
 
@@ -354,8 +358,24 @@ Each entry in `commands`:
 - `estimated_duration_s` (number, OPTIONAL): typical wall-clock duration.
   Clients SHOULD use it to choose timeouts, and SHOULD apply their own
   default timeout when it is absent.
-- `interruptible` (boolean, REQUIRED): whether `command/cancel` can
-  interrupt this command mid-run (§8.3).
+- `cancel_semantics` (string, OPTIONAL, default `"none"`): what
+  `command/cancel` can honestly do to this command once it is running
+  (§8.3). One of:
+  - `"abort"`: the backend has a real halt path; cancellation may
+    interrupt the physical operation, and the server can confirm whether
+    the halt happened.
+  - `"between_steps"`: the handler issues a sequence of backend
+    operations; cancellation finishes the operation in flight and stops
+    at the next boundary. It never interrupts a step.
+  - `"none"`: once running, the command runs to completion. The physical
+    action is already committed (on the wire to the device, or simply
+    not stoppable), and pretending otherwise would be a lie.
+  The default is deliberately the safe one: a command that does not say
+  what cancel means cannot be cancelled mid-run. v0.3's `interruptible`
+  boolean is REMOVED; a boolean could not distinguish aborting from
+  stopping between steps, and its reference implementation abandoned the
+  in-flight backend call, reporting `canceled` while hardware kept
+  moving (SPEC-FINDINGS F10).
 - `clears_interlocks` (array of strings, OPTIONAL): declared interlock
   names this command can clear. See §8.5: such a command remains submittable
   while a named interlock is tripped.
@@ -560,6 +580,9 @@ object:
 - `error` (object, OPTIONAL): an Error object (§12.2); present iff
   `status` is `failed`, except that servers MAY additionally attach an
   error with category `canceled` (code `-32006`) to `canceled` runs.
+- `cancellation` (object, OPTIONAL): present on a terminal status iff a
+  cancel was accepted for this run; see §8.3 for its fields and the
+  claims it may and may not make.
 - `resource_revisions` (array, OPTIONAL): on a **terminal** status, the
   resources this run changed, as `[{uri, revision}]` with each resource's
   revision after the run. This is the write-returns-the-new-revision
@@ -578,17 +601,65 @@ submitted it closes; cross-session persistence is not required (§6.2).
 
 `command/cancel` params: `{command_id}`.
 
-- For a cancelable run (`accepted`, or `running` with `interruptible: true`),
-  the server MUST initiate cancellation and reply with the current
-  CommandStatus (typically `canceling`). The terminal state, `canceled`, or
-  `succeeded`/`failed` if completion won the race, arrives via
+**Acknowledgment is not settlement.** A `command/cancel` reply of
+`canceling` means the server accepted the request; it claims nothing
+about the physical world. Settlement is the run's terminal status, and
+its `cancellation` block (below) states what actually happened. This
+distinction exists because on real instruments a stop request returning
+does not mean motion stopped (SPEC-FINDINGS F10).
+
+Acceptance rules:
+
+- A run in `accepted` (not yet running) MAY be cancelled regardless of
+  `cancel_semantics`: dequeuing is not interruption. The server MUST
+  reply with the current CommandStatus (typically `canceling`) and
+  settle it `canceled`.
+- A `running` run whose command declares `"abort"` or `"between_steps"`:
+  the server MUST initiate cancellation per the declared semantics and
+  reply with the current CommandStatus. The terminal state (`canceled`,
+  or `succeeded`/`failed` if completion won the race) arrives via
   `notifications/command_status`.
-- For a run that is already terminal, in state `canceling`, or `running`
-  but not interruptible, the server MUST reply with error `-32007`
-  (`not_cancelable`). An unknown `command_id` → error `-32000`
-  (`validation`), as in `command/status`. Cancellation is therefore
-  idempotent-safe: a duplicate cancel fails cleanly without affecting the
-  run, and "no such run" remains distinguishable from "cannot cancel".
+- A `running` run whose command declares `"none"`: the server MUST
+  reply with error `-32007` (`not_cancelable`), with
+  `details.cancel_semantics: "none"` and `details.state: "running"`.
+  A server MUST NOT accept such a cancel and ignore it: refusal is the
+  only honest answer.
+- A run that is already terminal or in `canceling`: error `-32007`, with
+  `details.state` naming the state. An unknown `command_id` → error
+  `-32000` (`validation`), as in `command/status`. Cancellation is
+  therefore idempotent-safe, and "no such run" remains distinguishable
+  from "cannot cancel".
+
+**Settlement.** Any run that accepted a cancel MUST carry a
+`cancellation` object on its terminal CommandStatus and in its signed
+manifest (§13.1):
+
+- `requested_at` (string, REQUIRED): when the cancel was accepted.
+- `outcome` (string, REQUIRED):
+  - `"halted"`: the backend CONFIRMED the physical stop. Only an
+    `"abort"` command can settle this way, and only on positive
+    confirmation.
+  - `"halted_at_boundary"`: a `"between_steps"` command finished its
+    in-flight step and stopped at the boundary.
+  - `"ran_to_completion"`: completion won the race; the terminal status
+    is `succeeded` or `failed`, and this block records that a cancel
+    was pending when it finished.
+  - `"unconfirmed"`: the stop was requested but the backend did not
+    confirm the physical state within the server's settlement window.
+    The terminal status is `canceled` and this is all the manifest
+    asserts. This outcome is not a failure of the protocol; it is the
+    truth, and servers MUST use it rather than guessing.
+- `boundary` (object, present iff `outcome` is `"halted_at_boundary"`):
+  `{completed_steps (integer), of_steps (integer or null), last
+  (string)}`, the last step that completed.
+- `detail` (string, OPTIONAL): free text, e.g. what the backend said or
+  failed to say.
+
+A terminal status of `canceled` asserts only that the run ended because
+of cancellation; the physical claim lives entirely in
+`cancellation.outcome`. A signed manifest MUST NOT contain a `canceled`
+status without a `cancellation` block, and MUST NOT claim `"halted"`
+without backend confirmation.
 
 ### 8.4 Concurrency
 
@@ -966,7 +1037,7 @@ Labwire domain errors use the JSON-RPC server-error range:
 | -32004 | `hardware_fault` | The instrument reported a hardware failure | no |
 | -32005 | `timeout` | The instrument did not respond internally in time | yes |
 | -32006 | `canceled` | The run was canceled | no |
-| -32007 | `not_cancelable` | Cancel requested for a run that cannot be canceled | no |
+| -32007 | `not_cancelable` | Cancel refused: terminal, already canceling, or the command declares `cancel_semantics: "none"` (details say which, §8.3) | no |
 | -32008 | `internal` | Unexpected server error | no |
 | -32009 | `confirmation_required` | An `S2` command was submitted without an acceptable `confirmation` (§8.6) | no |
 | -32010 | `unknown_reference` | A `resource_ref` parameter value, or a `resource/read` URI, does not resolve in current resource state (§10.4) | no |
@@ -1032,8 +1103,8 @@ method.
 ```json
 <!-- example: manifest/document -->
 {
-  "manifest_version": "0.3",
-  "protocol_version": "0.3",
+  "manifest_version": "0.4",
+  "protocol_version": "0.4",
   "run_id": "b7e0a1c2-4d5e-4f60-8a9b-0c1d2e3f4a5b",
   "instrument": {
     "manufacturer": "Labwire Project",
@@ -1074,7 +1145,7 @@ method.
 
 All fields are REQUIRED unless marked otherwise:
 
-- `manifest_version` (string): `"0.3"` for this document. Verifiers MUST
+- `manifest_version` (string): `"0.4"` for this document. Verifiers MUST
   also accept `"0.2"` bundles, which lack the members introduced below;
   the format change breaks producers, not verifiers.
 - `protocol_version` (string): the negotiated protocol version (§4).
@@ -1104,6 +1175,12 @@ All fields are REQUIRED unless marked otherwise:
   artifact. `identity_verified` exists so the honesty caveat of §8.6 is a
   machine-checkable wire fact rather than prose: verifiers MUST surface
   it, and a future version with cryptographic operator identity flips it.
+- `cancellation` (object, present iff a cancel was accepted for the
+  run): the settlement block of §8.3, covered by the signature. A signed
+  manifest MUST NOT record a `canceled` status without it, and MUST NOT
+  record `outcome: "halted"` the backend did not confirm: a manifest
+  that asserts a physical halt the backend cannot vouch for is worse
+  than no manifest at all.
 - `resource_revisions` (array, OPTIONAL): for each resource the run
   changed, `{uri, revision_at_start, revision_at_end}`, so an auditor can
   ask whether state moved under the run.
@@ -1260,7 +1337,8 @@ implements:
 | §8.6 `S3` operator grants | Implemented: file-backed store, pending requests, atomic use counts, `labwire grant`. **Assumes the store lives where the agent cannot write; nothing in-protocol enforces that** |
 | §8.6 cryptographic operator identity | **Not implemented**: `identity_verified` is `false` in every manifest; see §14 and ROADMAP.md |
 | §10.5 `if_revision` | Implemented. **No reservation, no lost-update protection beyond it** |
-| §13 signed manifests | Implemented: bundle = `manifest.json` + `records.jsonl`, verified by `labwire verify`; 0.2 and 0.3 bundles both verify |
+| §8.3 `cancel_semantics` and settlement | Implemented: refusal on `"none"`, boundary settlement for `"between_steps"`, `"unconfirmed"` when a backend cannot confirm a halt |
+| §13 signed manifests | Implemented: bundle = `manifest.json` + `records.jsonl`, verified by `labwire verify`; 0.2, 0.3, and 0.4 bundles all verify |
 | §14 `api_key` stub | **Deferred, unscheduled** |
 | In-memory transport (test-only; not a §5 transport) | Implemented |
 
@@ -1714,6 +1792,47 @@ appears: one would not satisfy `S3`.
 }
 ```
 
+A cancelled run settles with its `cancellation` block (§8.3); here a
+between-steps command stopped at a boundary:
+
+```json
+<!-- example: command/status/result -->
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "command_id": "5f0c2f0a-7c1e-4d0b-9a63-2f3a1c8d9e4b",
+    "status": "canceled",
+    "cancellation": {
+      "requested_at": "2026-07-28T10:15:02.114Z",
+      "outcome": "halted_at_boundary",
+      "boundary": { "completed_steps": 1, "of_steps": 2, "last": "aspirate" },
+      "detail": "in-flight aspirate finished; dispense was never issued"
+    }
+  }
+}
+```
+
+And one whose backend never confirmed the stop; `unconfirmed` is the
+honest settlement, not an error:
+
+```json
+<!-- example: command/status/result -->
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "command_id": "9a1b2c3d-4e5f-4a60-b7c8-d9e0f1a2b3c4",
+    "status": "canceled",
+    "cancellation": {
+      "requested_at": "2026-07-28T10:16:40.020Z",
+      "outcome": "unconfirmed",
+      "detail": "device stop() returned but the status object never resolved"
+    }
+  }
+}
+```
+
 ### 16.9 command/cancel
 
 ```json
@@ -1734,6 +1853,26 @@ appears: one would not satisfy `S3`.
   "result": {
     "command_id": "5f0c2f0a-7c1e-4d0b-9a63-2f3a1c8d9e4b",
     "status": "canceling"
+  }
+}
+```
+
+Cancel against a running command that declares `cancel_semantics:
+"none"` is refused, never accepted-and-ignored (§8.3):
+
+```json
+<!-- example: error/response -->
+{
+  "jsonrpc": "2.0",
+  "id": 6,
+  "error": {
+    "code": -32007,
+    "message": "aspirate is running and declares cancel_semantics 'none': the operation is already committed to the device",
+    "data": {
+      "category": "not_cancelable",
+      "retryable": false,
+      "details": { "cancel_semantics": "none", "state": "running" }
+    }
   }
 }
 ```
@@ -1990,6 +2129,18 @@ Labwire, lives in `PRIOR_ART.md` at the repository root.
 
 ## 18. Changelog
 
+- **0.4.0 (2026-07-28):** Protocol version `"0.4"`. Cancellation made
+  honest, prompted by field reports from an Opentrons Flex owner and the
+  PyLabRobot maintainer (SPEC-FINDINGS F10). **Added:** per-command
+  `cancel_semantics` (`"abort"`, `"between_steps"`, `"none"`; §7),
+  acknowledgment-vs-settlement in §8.3, and the `cancellation`
+  settlement block on terminal CommandStatus and in signed manifests
+  (§13.1), including the first-class `"unconfirmed"` outcome for stops
+  the backend cannot vouch for. **Removed (breaking):** the
+  `interruptible` boolean; its cancellable-by-default semantics are the
+  behavior the field reports indicted. Undeclared commands now default
+  to `"none"`. Manifest version `"0.4"`; 0.3 and earlier bundles still
+  verify.
 - **0.3.0 (2026-07-27):** Protocol version `"0.3"`. Things, not only
   quantities. **Added:** resources: URI-identified, typed, readable
   instrument state declared in the descriptor (§7.6) and read with
