@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire"
-version = "0.4.0"
+version = "0.4.1"
 description = "Labwire quickstart bundle: protocol SDK, simulated instruments, drivers, and CLI"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,10 +22,10 @@ classifiers = [
 # distribution contains no code and installs no modules of its own: the
 # labwire.* namespace is populated entirely by the pinned dependencies.
 dependencies = [
-  "labwire-core==0.4.0",
-  "labwire-sim==0.4.0",
-  "labwire-drivers==0.4.0",
-  "labwire-cli==0.4.0",
+  "labwire-core==0.4.1",
+  "labwire-sim==0.4.1",
+  "labwire-drivers==0.4.1",
+  "labwire-cli==0.4.1",
 ]
 
 [project.urls]

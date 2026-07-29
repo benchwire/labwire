@@ -580,7 +580,7 @@ wheels = [
 
 [[package]]
 name = "labwire"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/meta" }
 dependencies = [
     { name = "labwire-cli" },
@@ -599,7 +599,7 @@ requires-dist = [
 
 [[package]]
 name = "labwire-cli"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "labwire-core" },
@@ -616,7 +616,7 @@ dev = [
 requires-dist = [
     { name = "labwire-core", editable = "packages/core" },
     { name = "labwire-drivers", editable = "packages/drivers" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "typer", specifier = ">=0.12,<1" },
 ]
 
 [package.metadata.requires-dev]
@@ -624,7 +624,7 @@ dev = [{ name = "labwire-sim", editable = "packages/sim" }]
 
 [[package]]
 name = "labwire-conformance"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/conformance" }
 dependencies = [
     { name = "jsonschema" },
@@ -641,10 +641,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jsonschema", specifier = ">=4.21" },
+    { name = "jsonschema", specifier = ">=4.21,<5" },
     { name = "labwire-core", editable = "packages/core" },
-    { name = "typer", specifier = ">=0.12" },
-    { name = "websockets", specifier = ">=13" },
+    { name = "typer", specifier = ">=0.12,<1" },
+    { name = "websockets", specifier = ">=13,<17" },
 ]
 
 [package.metadata.requires-dev]
@@ -655,7 +655,7 @@ dev = [
 
 [[package]]
 name = "labwire-core"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "pydantic" },
@@ -665,14 +665,14 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pynacl", specifier = ">=1.5" },
-    { name = "websockets", specifier = ">=14" },
+    { name = "pydantic", specifier = ">=2.7,<3" },
+    { name = "pynacl", specifier = ">=1.5,<2" },
+    { name = "websockets", specifier = ">=14,<17" },
 ]
 
 [[package]]
 name = "labwire-drivers"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/drivers" }
 dependencies = [
     { name = "labwire-core" },
@@ -695,9 +695,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "labwire-core", editable = "packages/core" },
-    { name = "pyserial", marker = "extra == 'serial'", specifier = ">=3.5" },
-    { name = "pyserial-asyncio-fast", marker = "extra == 'serial'", specifier = ">=0.16" },
-    { name = "pyyaml", specifier = ">=6" },
+    { name = "pyserial", marker = "extra == 'serial'", specifier = ">=3.5,<4" },
+    { name = "pyserial-asyncio-fast", marker = "extra == 'serial'", specifier = ">=0.16,<1" },
+    { name = "pyyaml", specifier = ">=6,<7" },
 ]
 provides-extras = ["serial"]
 
@@ -710,7 +710,7 @@ dev = [
 
 [[package]]
 name = "labwire-mcp"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "labwire-core" },
@@ -726,7 +726,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "labwire-core", editable = "packages/core" },
-    { name = "mcp", specifier = ">=1.2" },
+    { name = "mcp", specifier = ">=1.2,<2" },
 ]
 
 [package.metadata.requires-dev]
@@ -737,7 +737,7 @@ dev = [
 
 [[package]]
 name = "labwire-ophyd"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/bridges/ophyd" }
 dependencies = [
     { name = "labwire-core" },
@@ -759,9 +759,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "labwire-core", editable = "packages/core" },
-    { name = "ophyd", marker = "extra == 'ophyd'", specifier = ">=1.9" },
-    { name = "pyyaml", specifier = ">=6" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "ophyd", marker = "extra == 'ophyd'", specifier = ">=1.9,<2" },
+    { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "typer", specifier = ">=0.12,<1" },
 ]
 provides-extras = ["ophyd"]
 
@@ -773,7 +773,7 @@ dev = [
 
 [[package]]
 name = "labwire-pylabrobot"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/bridges/pylabrobot" }
 dependencies = [
     { name = "labwire-core" },
@@ -794,9 +794,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "labwire-core", editable = "packages/core" },
-    { name = "pylabrobot", marker = "extra == 'pylabrobot'", specifier = ">=0.2" },
-    { name = "pyyaml", specifier = ">=6" },
-    { name = "typer", specifier = ">=0.12" },
+    { name = "pylabrobot", marker = "extra == 'pylabrobot'", specifier = ">=0.2,<0.3" },
+    { name = "pyyaml", specifier = ">=6,<7" },
+    { name = "typer", specifier = ">=0.12,<1" },
 ]
 provides-extras = ["pylabrobot"]
 
@@ -805,7 +805,7 @@ dev = [{ name = "pylabrobot", specifier = ">=0.2" }]
 
 [[package]]
 name = "labwire-sim"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "packages/sim" }
 dependencies = [
     { name = "labwire-core" },

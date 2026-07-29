@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-core"
-version = "0.4.0"
+version = "0.4.1"
 description = "Labwire core protocol library: server and client SDKs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,9 +20,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "pydantic>=2.7",
-    "pynacl>=1.5",
-    "websockets>=14",
+    "pydantic>=2.7,<3",
+    "pynacl>=1.5,<2",
+    "websockets>=14,<17",
 ]
 
 [tool.hatch.build.targets.wheel]

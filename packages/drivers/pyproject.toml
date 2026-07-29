@@ -4,16 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-drivers"
-version = "0.4.0"
+version = "0.4.1"
 description = "Labwire instrument drivers speaking native wire protocols (SCPI/TCP, serial-style)"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core", "pyyaml>=6"]
+dependencies = ["labwire-core>=0.4.1,<0.5", "pyyaml>=6,<7"]
 
 [project.optional-dependencies]
-serial = ["pyserial-asyncio-fast>=0.16", "pyserial>=3.5"]
+serial = ["pyserial-asyncio-fast>=0.16,<1", "pyserial>=3.5,<4"]
 
 [dependency-groups]
 dev = ["labwire-sim", "pyserial-asyncio-fast>=0.16", "pyserial>=3.5"]

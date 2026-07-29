@@ -4,6 +4,21 @@ All notable changes to Labwire. The protocol version (`"0.2"`) and the
 package versions move together while the project is pre-1.0; breaking
 changes are expected until then, and are called out explicitly.
 
+## 0.4.1, 2026-07-29
+
+### Fixed
+
+- **Dependency upper bounds everywhere.** `labwire-mcp` declared
+  `mcp>=1.2` with no ceiling, so the moment the MCP Python SDK ships its
+  v2 (breaking, announced alongside the 2026-07-28 MCP specification),
+  every fresh `pip install labwire-mcp` would pull it and die. Now
+  `mcp>=1.2,<2`. The audit applied the same discipline across every
+  published package: majors bounded for pydantic, websockets, pynacl,
+  pyyaml, typer, jsonschema, the serial extras, and the bridge extras,
+  and the `labwire-*` cross-dependencies are bounded to the current
+  minor (`>=0.4.1,<0.5`) so a future breaking labwire-core can never be
+  pulled under an older adapter. No code changes.
+
 ## 0.4.0, 2026-07-29
 
 Protocol version `"0.4"`: cancellation made honest. Driven by field

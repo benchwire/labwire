@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "labwire-sim"
-version = "0.4.0"
+version = "0.4.1"
 description = "Labwire simulated instruments: realistic devices speaking native wire protocols"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [{ name = "Silous Ramelli" }]
-dependencies = ["labwire-core"]
+dependencies = ["labwire-core>=0.4.1,<0.5"]
 
 [tool.uv.sources]
 labwire-core = { workspace = true }
