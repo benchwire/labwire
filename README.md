@@ -231,6 +231,17 @@ pollable tasks for clients that declare the tasks extension. The
 [labwire-mcp README](packages/mcp/README.md) has the era matrix and the
 honest caveats.
 
+The protocol enforces what it can at the instrument boundary. Some conduct
+only the agent can uphold: respecting an S3 refusal, not treating cancel as
+an undo, reporting only what the signed record supports. Those expectations
+are written as behavior specs under [.agents/behaviors](.agents/behaviors)
+in the [Agent Behavior](https://www.agentbehavior.dev/) format, so trace
+reviewers and eval harnesses have a concrete standard to grade an agent
+against. A test pins each spec to exact sentences the MCP adapter serves
+at runtime (tool descriptions for the safety and cancellation conduct,
+task status text for evidence reporting), so the graded standard and the
+served instructions cannot drift apart on the pinned wording.
+
 ## Honesty and scope
 
 The three instruments are **original simulated device models**, with

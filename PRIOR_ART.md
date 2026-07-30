@@ -203,6 +203,29 @@ and claims no real-hardware compatibility.
 Python API; Labwire is a protocol with discovery, typed errors, interlocks,
 and signed evidence, intended to sit *under* frameworks like it.
 
+## Agent Behavior (behavior specs)
+
+An open format from Braintrust and Basis (announced 2026-07-29,
+Apache-2.0) for writing down the conduct an AI agent is expected to
+follow across repeated interactions: markdown specs under
+`.agents/behaviors/`, meant for trace reviewers and evaluation harnesses
+rather than for injection into runtime prompts. It supervises the agent
+side of the loop, which is the side an instrument protocol cannot reach:
+Labwire enforces schemas, units, safety classes, and cancellation
+settlement at the instrument boundary (signed into the run bundle when a
+deployment records manifests), and no wire check makes an agent respect a
+refusal or report only what the record supports. Labwire adopts the
+format for exactly that residue; the specs in
+[.agents/behaviors](.agents/behaviors) cover S2 approval conduct, S3
+grant handling, cancellation planning, and evidence-backed reporting, and
+each quotes sentences the MCP adapter serves at runtime, with a test that
+fails if either side's pinned wording drifts. The format is
+new (its reference CLI is not yet on npm, checked 2026-07-30), so CI
+enforces the format's structural rules in that same test; the specs were
+also validated once against the reference validator built from the
+format's repository. It is not an instrument protocol and does not
+appear in the comparison table below.
+
 ## Summary
 
 | | Transport | Discovery | AI-native | Signed results | Running implementation | Setup |

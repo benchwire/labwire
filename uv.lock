@@ -741,6 +741,7 @@ dependencies = [
 dev = [
     { name = "labwire-drivers" },
     { name = "labwire-sim" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -753,6 +754,7 @@ requires-dist = [
 dev = [
     { name = "labwire-drivers", editable = "packages/drivers" },
     { name = "labwire-sim", editable = "packages/sim" },
+    { name = "pyyaml", specifier = ">=6,<7" },
 ]
 
 [[package]]

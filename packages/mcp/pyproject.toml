@@ -16,7 +16,7 @@ dependencies = ["labwire-core>=0.5,<0.6", "mcp>=2,<3"]
 labwire-mcp = "labwire.mcp.main:main"
 
 [dependency-groups]
-dev = ["labwire-sim", "labwire-drivers"]
+dev = ["labwire-sim", "labwire-drivers", "pyyaml>=6,<7"]
 
 [tool.uv.sources]
 labwire-core = { workspace = true }
