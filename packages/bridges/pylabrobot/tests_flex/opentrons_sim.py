@@ -33,6 +33,7 @@ class FlexServerSim:
         self.fail_types: set[str] = set()
         self.hold_types: set[str] = set()
         self.release = asyncio.Event()
+        self.actions: list[dict[str, Any]] = []
         self.stopped = False
         self._ids = itertools.count(1)
         self._status: dict[str, tuple[str, str]] = {}  # id -> (type, status)
@@ -70,8 +71,11 @@ class FlexServerSim:
         if path == "/runs" and request.method == "POST":
             return httpx.Response(201, json={"data": {"id": "run-sim-1"}})
         if path.endswith("/actions") and request.method == "POST":
-            self.stopped = True
-            return httpx.Response(201, json={"data": {"actionType": "stop"}})
+            action = json.loads(request.content)["data"]
+            self.actions.append(action)
+            if action.get("actionType") == "stop":
+                self.stopped = True
+            return httpx.Response(201, json={"data": action})
         if request.method == "DELETE":
             return httpx.Response(200, json={"data": {}})
         if path.endswith("/commands") and request.method == "POST":

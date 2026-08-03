@@ -4,8 +4,9 @@ Everything here runs against a simulation of the Opentrons robot-server
 command layer (``opentrons_sim.FlexServerSim``); no hardware behavior
 is claimed. The whole module is skipped unless the pinned PR-head
 install of PyLabRobot (which alone contains ``pylabrobot.opentrons``)
-is present; the ``plr-v1-flex-experimental`` CI job on this branch
-installs it, and normal CI never sees these tests run. These tests live
+(or any install providing the same modules) is present; the
+``plr-v1-flex-experimental`` CI job on this branch installs the pin,
+and normal CI never sees these tests run. These tests live
 in their own directory because the shipped tests' conftest imports
 LiquidHandler at module scope, and the pinned PR-head snapshot cannot
 import it (its v1b1 base has a broken legacy import chain; see
@@ -32,8 +33,12 @@ from opentrons_sim import FlexServerSim  # noqa: E402
 opentrons = pytest.importorskip(
     "pylabrobot.opentrons", reason="needs the PR #1184 pinned install (plr-v1 branch job)"
 )
-flex_deck_module = importlib.import_module("pylabrobot.resources.opentrons.flex_deck")
-flex_racks = importlib.import_module("pylabrobot.resources.opentrons.flex_tip_racks")
+flex_deck_module = pytest.importorskip(
+    "pylabrobot.resources.opentrons.flex_deck", reason="needs the PR #1184 FlexDeck"
+)
+flex_racks = pytest.importorskip(
+    "pylabrobot.resources.opentrons.flex_tip_racks", reason="needs the PR #1184 tip racks"
+)
 plr_resources = importlib.import_module("pylabrobot.resources")
 
 from labwire.bridges.pylabrobot.plainclass import OpentronsFlexInstrument  # noqa: E402
@@ -351,4 +356,37 @@ async def test_stop_reaches_the_robot_and_says_so_honestly(
     handle = await client.submit("stop", {})  # S0: no confirmation needed
     result = await handle.result(timeout=20.0)
     assert result["stopped"] is True
-    assert sim.stopped is True
+    assert sim.actions == [{"actionType": "stop"}]
+
+
+# --- the pinned driver's single-channel-first shape is enforced -------------
+
+
+async def test_multi_element_calls_are_refused_not_misrecorded(
+    served: tuple[Any, FlexServerSim, LabwireClient],
+) -> None:
+    """The bridge refuses the arity rather than let the record diverge.
+
+    The pinned driver executes element [0] but records every element.
+    """
+    _, sim, client = served
+    before = len(sim.commands)
+    with pytest.raises(LabwireError, match="exactly one element"):
+        await _call(
+            client,
+            "pick_up_tips",
+            {"tip_spots": ["labwire:deck/tips/A1", "labwire:deck/tips/B1"]},
+        )
+    with pytest.raises(LabwireError, match="exactly one element"):
+        await _call(
+            client,
+            "aspirate",
+            {
+                "wells": ["labwire:deck/source_plate/A1", "labwire:deck/source_plate/B1"],
+                "volumes_ul": [10.0, 20.0],
+            },
+        )
+    assert len(sim.commands) == before  # nothing reached the robot
+    snapshot = await client.read_resource("labwire:deck")
+    labware = {item["uri"]: item for item in snapshot.content["labware"]}
+    assert labware["labwire:deck/tips"]["tips_available"] == 96  # record untouched

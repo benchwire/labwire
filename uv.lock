@@ -810,6 +810,7 @@ pylabrobot = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "pylabrobot" },
 ]
 
@@ -823,7 +824,10 @@ requires-dist = [
 provides-extras = ["pylabrobot"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pylabrobot", specifier = ">=0.2,<0.3" }]
+dev = [
+    { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "pylabrobot", specifier = ">=0.2,<0.3" },
+]
 
 [[package]]
 name = "labwire-sim"

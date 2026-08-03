@@ -97,9 +97,36 @@ class DeckBoundDevice:
     """
 
     def __init__(self, device: Any, deck: Any, name: str) -> None:
+        if getattr(device, "_channel_tips", None) is None:
+            # Declaration-time strictness, as everywhere else in Labwire: a
+            # device this view cannot read channel state from would serve
+            # a deck resource that silently reports zero channels.
+            raise TypeError(
+                "device has no _channel_tips; this view only knows how to read "
+                "channel state from the PR #1184 Flex driver"
+            )
         self.device = device
         self.deck = deck
         self.name = name
+
+    @staticmethod
+    def _single(values: Any, what: str) -> None:
+        """Refuse multi-element calls the pinned driver would misexecute.
+
+        At the pinned commit the Flex driver builds the robot command from
+        element [0] of each list but commits tracker state for EVERY zipped
+        element, so a multi-element call through this bridge would record
+        liquid and tips the robot never moved. Reported state diverging
+        from physical state is the one failure this project exists to
+        prevent, so until the driver executes batches, the bridge refuses
+        them. See V1B1.md.
+        """
+        if values is not None and len(values) > 1:
+            raise ValidationError(
+                f"{what} accepts exactly one element with the pinned Flex driver "
+                "(single-channel-first, PR #1184): a multi-element call would be "
+                "recorded in full but executed only for the first element"
+            )
 
     # --- resource surface (consumed by introspect/addressing/deck) --------
 
@@ -113,26 +140,42 @@ class DeckBoundDevice:
 
     @property
     def head(self) -> dict[int, _ChannelView]:
-        """Channel index to tracker-shaped view of the mounted tip."""
-        tips = getattr(self.device, "_channel_tips", None) or []
+        """Channel index to tracker-shaped view of the mounted tip.
+
+        Clamped to the discovered pipette's channel count once ``setup()``
+        has run: the driver's ``_channel_tips`` is a fixed 8-slot list even
+        when a single-channel pipette is mounted, and advertising channels
+        that do not physically exist would be fiction.
+        """
+        tips = list(getattr(self.device, "_channel_tips", None) or [])
+        pipette = getattr(self.device, "pipette", None)
+        channels = getattr(pipette, "channels", None)
+        if isinstance(channels, int) and 0 < channels < len(tips):
+            tips = tips[:channels]
         return {index: _ChannelView(tip) for index, tip in enumerate(tips)}
 
     # --- operations (consumed by PyLabRobotBridge handlers) ----------------
 
     async def pick_up_tips(self, tip_spots: list[Any], use_channels: Any = None) -> None:
-        """Forward to the device."""
+        """Forward to the device, refusing arities it would misexecute."""
+        self._single(tip_spots, "pick_up_tips")
+        self._single(use_channels, "pick_up_tips channels")
         await self.device.pick_up_tips(tip_spots, use_channels=use_channels)
 
     async def drop_tips(self, tip_spots: list[Any], use_channels: Any = None) -> None:
-        """Forward to the device."""
+        """Forward to the device, refusing arities it would misexecute."""
+        self._single(tip_spots, "drop_tips")
+        self._single(use_channels, "drop_tips channels")
         await self.device.drop_tips(tip_spots, use_channels=use_channels)
 
     async def aspirate(self, resources: list[Any], vols: Any, flow_rates: Any = None) -> None:
-        """Forward to the device."""
+        """Forward to the device, refusing arities it would misexecute."""
+        self._single(resources, "aspirate")
         await self.device.aspirate(resources, vols=vols, flow_rates=flow_rates)
 
     async def dispense(self, resources: list[Any], vols: Any, flow_rates: Any = None) -> None:
-        """Forward to the device."""
+        """Forward to the device, refusing arities it would misexecute."""
+        self._single(resources, "dispense")
         await self.device.dispense(resources, vols=vols, flow_rates=flow_rates)
 
     async def stop(self) -> None:
@@ -197,18 +240,26 @@ class OpentronsFlexBridge(PyLabRobotBridge):
         ``between_steps``.
         """
         view = cast("DeckBoundDevice", self._lh)
-        trash = view.deck.get_trash_area()
         mounted = [index for index, channel in view.head.items() if channel.has_tip]
         if not mounted:
             raise ValidationError("no tips are mounted; nothing to discard")
         try:
-            for position, index in enumerate(mounted):
-                await view.device.drop_tips([trash], use_channels=[index])
-                self._publish_state()
-                if position < len(mounted) - 1:
-                    ctx.boundary(f"discarded channel {index}", of=len(mounted))
+            trash = view.deck.get_trash_area()
         except Exception as exc:
-            raise map_error(exc) from exc
+            raise ValidationError(
+                "this deck has no trash area; discard_tips needs one "
+                "(build the FlexDeck with with_trash_bin=True)"
+            ) from exc
+        for position, index in enumerate(mounted):
+            try:
+                await view.device.drop_tips([trash], use_channels=[index])
+            except Exception as exc:
+                raise map_error(exc) from exc
+            self._publish_state()
+            # Outside the try, as in do_transfer: a boundary stop is
+            # settlement control flow, not a device error to map.
+            if position < len(mounted) - 1:
+                ctx.boundary(f"discarded channel {index}", of=len(mounted))
         return DiscardResult(channels_used=mounted)
 
 
