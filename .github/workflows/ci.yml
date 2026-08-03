@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # plr-v1 is listed only in this branch's copy of this file, so the
+    # experimental branch gets CI without touching main's triggers.
+    branches: [main, plr-v1]
   pull_request:
 
 jobs:
