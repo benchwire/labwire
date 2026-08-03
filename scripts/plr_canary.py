@@ -40,6 +40,10 @@ BRIDGE = "packages/bridges/pylabrobot"
 PROBES = [
     ("labwire.bridges.pylabrobot", None),
     ("pylabrobot.resources", "set_tip_tracking"),
+    ("pylabrobot.resources", "set_volume_tracking"),
+    ("pylabrobot.resources", "Coordinate"),
+    ("pylabrobot.resources", "Deck"),
+    ("pylabrobot.resources.errors", "NoTipError"),
     ("pylabrobot.liquid_handling", "LiquidHandler"),
     ("pylabrobot.liquid_handling.backends", "LiquidHandlerChatterboxBackend"),
     ("pylabrobot.liquid_handling.errors", "ChannelizedError"),
@@ -51,14 +55,21 @@ PROBES = [
 
 
 def installed_plr() -> str:
-    """The installed PLR version and, for a VCS install, its commit."""
-    version = importlib.metadata.version("pylabrobot")
-    commit = "unknown commit"
-    dist = importlib.metadata.distribution("pylabrobot")
-    for f in dist.files or []:
-        if f.name == "direct_url.json":
-            data = json.loads(pathlib.Path(dist.locate_file(f)).read_text())
-            commit = data.get("vcs_info", {}).get("commit_id", commit)
+    """The installed PLR version and, for a VCS install, its commit.
+
+    Never raises: a missing distribution is itself a finding the report
+    must survive to deliver.
+    """
+    try:
+        version = importlib.metadata.version("pylabrobot")
+        commit = "unknown commit"
+        dist = importlib.metadata.distribution("pylabrobot")
+        for f in dist.files or []:
+            if f.name == "direct_url.json":
+                data = json.loads(pathlib.Path(dist.locate_file(f)).read_text())
+                commit = data.get("vcs_info", {}).get("commit_id", commit)
+    except Exception as exc:  # the report IS the error handler
+        return f"pylabrobot NOT INSTALLED ({type(exc).__name__}: {exc})"
     return f"pylabrobot {version} @ {commit}"
 
 
@@ -97,9 +108,9 @@ def run_suite() -> tuple[str, int, str]:
     )
     output = proc.stdout + proc.stderr
     tail = "\n".join(output.strip().splitlines()[-25:])
-    summary = "no summary line found"
+    summary = f"no summary line found (pytest exit code {proc.returncode})"
     for line in reversed(output.splitlines()):
-        if re.search(r"\d+ (passed|failed|error)", line):
+        if re.search(r"\d+ (passed|failed|error|skipped)|no tests ran", line):
             summary = line.strip()
             break
     return summary, proc.returncode, tail
