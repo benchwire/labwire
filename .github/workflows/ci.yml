@@ -23,6 +23,26 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest --cov --cov-report=term-missing
 
+  # BRANCH plr-v1 ONLY (this job exists only in this branch's ci.yml):
+  # the experimental plain-class bridge, tested against PyLabRobot pinned
+  # at the head commit of PR #1184 (the only place the Opentrons Flex
+  # plain-class driver exists). The pin is deliberate; refresh it by
+  # editing the SHA here and in plainclass.py together. The normal jobs
+  # above never see these tests run: without this install the module
+  # skips itself.
+  plr-v1-flex-experimental:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages
+      - run: uv pip install "pylabrobot @ git+https://github.com/vcjdeboer/pylabrobot@6ee378e5af672c92b59d53f2a0e33d9b68783613"
+      - run: uv run pytest packages/bridges/pylabrobot/tests_flex -v
+
   core-without-bridge-dependencies:
     # ophyd and pylabrobot are optional dependencies of the bridge packages:
     # the rest of the workspace must import and pass without either installed.
