@@ -21,7 +21,10 @@ pylabrobot = ["pylabrobot>=0.2,<0.3"]
 labwire-pylabrobot = "labwire.bridges.pylabrobot.cli:main"
 
 [dependency-groups]
-dev = ["pylabrobot>=0.2"]
+# Bounded like the shipped extra: a PLR 1.x release on PyPI must not be
+# pulled under main's own CI; the plr-canary workflow is where the v1b1
+# branch gets exercised, deliberately.
+dev = ["pylabrobot>=0.2,<0.3"]
 
 [tool.uv.sources]
 labwire-core = { workspace = true }

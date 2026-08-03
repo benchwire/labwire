@@ -1,0 +1,40 @@
+# PLR v1b1 canary. WHAT THIS IS:
+#
+# PyLabRobot is being redesigned on its v1b1 branch (plain-class device
+# drivers; the LiquidHandler world moves under pylabrobot.legacy behind
+# deprecation shims, and the branch is force-pushed while in flight).
+# Released labwire-pylabrobot pins pylabrobot>=0.2,<0.3, so users never
+# see that branch. This workflow is OUR early warning: on a schedule it
+# installs PLR straight from the v1b1 branch tip (deliberately unpinned;
+# drift is the thing being measured) and runs the shipped bridge test
+# suite against it, then publishes a compatibility report (which imports
+# fail, what API is gone, which tests break) as the job summary.
+#
+# THIS WORKFLOW IS ALLOWED TO FAIL AND MUST NEVER GATE NORMAL CI. It has
+# no push or pull_request trigger, so it can never block a commit or a
+# PR; a red run here is an early-warning signal about the upstream
+# redesign, not a build break. Read the run's job summary for the
+# report; scripts/plr_canary.py is the reporter.
+
+name: PLR v1b1 canary (allowed to fail)
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages
+      # Override the workspace's resolved pylabrobot (0.2.x from PyPI)
+      # with the v1b1 branch tip inside the same venv.
+      - run: uv pip install "pylabrobot @ git+https://github.com/PyLabRobot/pylabrobot@v1b1"
+      - run: uv run python scripts/plr_canary.py

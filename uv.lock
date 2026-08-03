@@ -823,7 +823,7 @@ requires-dist = [
 provides-extras = ["pylabrobot"]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pylabrobot", specifier = ">=0.2" }]
+dev = [{ name = "pylabrobot", specifier = ">=0.2,<0.3" }]
 
 [[package]]
 name = "labwire-sim"
