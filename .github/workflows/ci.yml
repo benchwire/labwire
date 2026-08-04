@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # synapse-bridge is listed only in this branch's copy of this file, so the
+    # experimental branch gets CI without touching main's triggers.
+    branches: [main, synapse-bridge]
   pull_request:
 
 jobs:
@@ -23,9 +25,37 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest --cov --cov-report=term-missing
 
+  # BRANCH synapse-bridge ONLY (this job exists only in this branch's ci.yml):
+  # the EXPERIMENTAL Synapse bridge, tested against the synapse-sim simulator
+  # that ships with science-synapse. science-synapse is an optional extra and
+  # is in no dependency group, so the jobs above never see these tests run:
+  # without this install the whole module skips itself.
+  #
+  # --no-sync on every step after the install is deliberate. `uv run` syncs the
+  # project environment by default, which would prune the package this job
+  # exists to exercise.
+  synapse-bridge-experimental:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-packages
+      - run: uv pip install "science-synapse>=2.7,<3"
+      - name: Record the exact version this run measured
+        run: uv run --no-sync python -c "
+          import importlib.metadata as m, synapse;
+          print('science-synapse', m.version('science-synapse'));
+          print('SYNAPSE_API_VERSION', synapse.SYNAPSE_API_VERSION)"
+      - run: uv run --no-sync pytest packages/bridges/synapse/tests -v
+
   core-without-bridge-dependencies:
-    # ophyd and pylabrobot are optional dependencies of the bridge packages:
-    # the rest of the workspace must import and pass without either installed.
+    # ophyd, pylabrobot and science-synapse are optional dependencies of the
+    # bridge packages: the rest of the workspace must import and pass without
+    # any of them installed.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,10 +65,10 @@ jobs:
           python-version: "3.12"
       - run: uv sync --all-packages
       - name: Remove the optional bridge dependencies
-        run: uv pip uninstall ophyd pylabrobot
+        run: uv pip uninstall ophyd pylabrobot science-synapse
       - name: Confirm they really are absent
         run: |
-          for module in ophyd pylabrobot; do
+          for module in ophyd pylabrobot synapse; do
             if uv run --no-sync python -c "import $module" 2>/dev/null; then
               echo "$module is still installed; this job proves nothing" >&2
               exit 1
@@ -47,12 +77,28 @@ jobs:
           done
       - name: labwire-core must still pass
         run: uv run --no-sync pytest packages/core/tests -q
-      - name: The bridge's pure layers must still import
-        # addressing and introspection are duck-typed and import no PyLabRobot.
+      - name: The bridges' pure layers must still import
+        # addressing and introspection are duck-typed and import no PyLabRobot;
+        # the Synapse bridge reaches science-synapse only through importlib.
         run: |
           uv run --no-sync python -c "
           from labwire.bridges.pylabrobot import command_surface, split_deck_uri
           assert split_deck_uri('labwire:deck/plate/A1') == ('plate', 'A1')
           assert len(command_surface()) == 12
           print('pure layers import without pylabrobot')
+          "
+          uv run --no-sync python -c "
+          from labwire.bridges.synapse import DEVICE_URI, SignalChain, status_name, unpack_version
+          from labwire.bridges.synapse.client import protos
+          assert DEVICE_URI == 'labwire:device'
+          assert status_name(2) == 'kInvalidConfiguration'
+          assert unpack_version(0) == 'unreported'
+          assert SignalChain().kinds() == []
+          try:
+              protos()
+          except ImportError as exc:
+              assert 'science-synapse is not installed' in str(exc), exc
+          else:
+              raise AssertionError('protos() must refuse without science-synapse')
+          print('pure layers import without science-synapse')
           "

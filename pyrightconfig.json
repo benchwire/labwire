@@ -20,6 +20,7 @@
     "packages/mcp/src",
     "packages/bridges/ophyd/src",
     "packages/bridges/pylabrobot/src",
+    "packages/bridges/synapse/src",
     "packages/conformance/src"
   ],
   "executionEnvironments": [
@@ -32,7 +33,8 @@
         "packages/cli/src",
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
-        "packages/bridges/pylabrobot/src"
+        "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -48,7 +50,8 @@
         "packages/cli/src",
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
-        "packages/bridges/pylabrobot/src"
+        "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -70,7 +73,8 @@
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
         "packages/bridges/pylabrobot/src",
-        "examples/ophyd_scan"
+        "examples/ophyd_scan",
+        "packages/bridges/synapse/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -87,7 +91,8 @@
         "packages/cli/src",
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
-        "packages/bridges/pylabrobot/src"
+        "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -103,7 +108,8 @@
         "packages/cli/src",
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
-        "packages/bridges/pylabrobot/src"
+        "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -125,7 +131,8 @@
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
         "packages/bridges/pylabrobot/src",
-        "examples/liquid_handling"
+        "examples/liquid_handling",
+        "packages/bridges/synapse/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
@@ -143,6 +150,7 @@
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
         "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src",
         "packages/conformance/src"
       ],
       "reportMissingTypeStubs": "none",
@@ -160,12 +168,54 @@
         "packages/mcp/src",
         "packages/bridges/ophyd/src",
         "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src",
         "packages/conformance/src"
       ],
       "reportMissingTypeStubs": "none",
       "reportUnknownMemberType": "none",
       "reportUnknownVariableType": "none",
       "reportUnknownArgumentType": "none"
+    },
+    {
+      "root": "packages/bridges/synapse/src",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none"
+    },
+    {
+      "root": "packages/bridges/synapse/tests",
+      "extraPaths": [
+        "packages/core/src",
+        "packages/sim/src",
+        "packages/drivers/src",
+        "packages/cli/src",
+        "packages/mcp/src",
+        "packages/bridges/ophyd/src",
+        "packages/bridges/pylabrobot/src",
+        "packages/bridges/synapse/src",
+        "packages/bridges/synapse/tests"
+      ],
+      "reportMissingTypeStubs": "none",
+      "reportUnknownMemberType": "none",
+      "reportUnknownVariableType": "none",
+      "reportUnknownArgumentType": "none",
+      "reportUnknownParameterType": "none",
+      "reportArgumentType": "none",
+      "reportIncompatibleMethodOverride": "none",
+      "reportReturnType": "none",
+      "reportUntypedBaseClass": "none",
+      "reportPrivateUsage": "none"
     }
   ]
 }

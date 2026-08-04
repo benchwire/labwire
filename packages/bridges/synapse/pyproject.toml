@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "labwire-synapse"
+version = "0.5.0"
+description = "EXPERIMENTAL: expose a Science Corp Synapse device as a Labwire instrument"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{ name = "Silous Ramelli" }]
+dependencies = ["labwire-core>=0.5,<0.6"]
+
+[project.optional-dependencies]
+# science-synapse is optional and is NOT in any dependency group: normal CI
+# never installs it, the whole test module skips without it, and the rest of
+# the workspace must import and pass with it absent. The branch-local
+# synapse-bridge-experimental CI job installs it deliberately.
+synapse = ["science-synapse>=2.7,<3"]
+
+[tool.uv.sources]
+labwire-core = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/labwire"]
