@@ -188,11 +188,15 @@ challenging and are recorded so they can be:
 
 ### 4. No authentication and no transport security, anywhere
 
-The control plane uses `grpc.insecure_channel` on the client and
-`add_insecure_port` on the server. The data plane is plain `tcp://` ZeroMQ with
-no authentication. There is no permissions mechanism in the protocol; the
-`kPermissionDenied` status code exists with nothing in the API that would
-produce it.
+The control plane uses `grpc.insecure_channel` on the client
+(`synapse/client/device.py:40`) and `add_insecure_port` on the server
+(`synapse/server/rpc.py:57`). Verified: those are the only two occurrences in
+the whole distribution, and there is no `secure_channel`, no
+`ssl_channel_credentials`, and no `add_secure_port` anywhere in it, so TLS is
+not merely off by default, it is not wired up. The data plane is plain `tcp://`
+ZeroMQ with no authentication. There is no permissions mechanism in the
+protocol; the `kPermissionDenied` status code exists, and nothing in the
+shipped client or simulator would ever produce it.
 
 Labwire's grant path is an **operator** gate, not a network one. It stops an
 agent from stimulating without a human approving those exact parameters. It
