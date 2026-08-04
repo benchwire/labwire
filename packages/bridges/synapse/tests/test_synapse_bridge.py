@@ -612,18 +612,31 @@ async def test_electrical_stimulation_is_gated_then_honestly_refused(
 async def test_only_s0_stays_submittable_while_the_device_reports_an_error(
     served: tuple[Any, InstrumentServer, LabwireClient],
 ) -> None:
-    """The interlock is what makes the S0 assignments load-bearing."""
+    """The interlock is what makes the S0 assignments load-bearing.
+
+    Re-tripped before each S0 command on purpose: every one of them refreshes
+    Info() and therefore clears the interlock again (the simulator never
+    reports kError), so without the re-trip only the first would actually be
+    proving anything.
+    """
     instrument, _, client = served
     instrument.device_error.trip()
 
     with pytest.raises(InterlockError):
         await call(client, "configure_broadband", BROADBAND)
+    with pytest.raises(InterlockError):
+        await call(client, "start_acquisition", {})
+    assert instrument.device_error.tripped  # a refused submit ran no handler
 
     # S0 commands stay available: the diagnostic, the stop, and the way back.
     info = await (await client.submit("get_info", {})).result(timeout=30.0)
     assert info["state"] in {"kStopped", "kRunning", "kInitializing"}
+
+    instrument.device_error.trip()
     stopped = await (await client.submit("stop", {})).result(timeout=30.0)
     assert stopped["stopped"] is True
+
+    instrument.device_error.trip()
     cleared = await (await client.submit("clear_signal_chain", {})).result(timeout=30.0)
     assert cleared["node_count"] == 0
 
