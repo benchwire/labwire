@@ -46,10 +46,13 @@ jobs:
       - run: uv sync --all-packages
       - run: uv pip install "science-synapse>=2.7,<3"
       - name: Record the exact version this run measured
-        run: uv run --no-sync python -c "
-          import importlib.metadata as m, synapse;
-          print('science-synapse', m.version('science-synapse'));
-          print('SYNAPSE_API_VERSION', synapse.SYNAPSE_API_VERSION)"
+        run: |
+          uv run --no-sync python -c "
+          import importlib.metadata as meta
+          import synapse
+          print('science-synapse', meta.version('science-synapse'))
+          print('SYNAPSE_API_VERSION', synapse.SYNAPSE_API_VERSION)
+          "
       - run: uv run --no-sync pytest packages/bridges/synapse/tests -v
 
   core-without-bridge-dependencies:

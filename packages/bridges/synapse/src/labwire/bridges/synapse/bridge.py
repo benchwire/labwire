@@ -83,7 +83,12 @@ _QUERY_IMPEDANCE = 1
 _QUERY_SAMPLE = 2
 _QUERY_SELF_TEST = 3
 _QUERY_GET_SETTINGS = 5
-"""``synapse.QueryRequest.QueryType``, verified against science-synapse 2.7.6."""
+"""``synapse.QueryRequest.QueryType``, verified against science-synapse 2.7.6.
+
+``kSample`` is listed for completeness and is deliberately not exposed: its
+response carries a bare ``repeated uint32 data`` with nothing in the protobuf
+saying what the numbers are or what unit they are in, so there is no honest
+UCUM code for a command to declare on it (SPEC §7.2)."""
 
 
 def unpack_version(packed: int) -> str:

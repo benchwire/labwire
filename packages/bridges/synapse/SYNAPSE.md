@@ -59,8 +59,15 @@ That ordering is this bridge's convention, not a Synapse rule, and it is
 stated in the code that implements it.
 
 Not mapped: `DiskWriter`, `Camera`, `Application`, `SpikeSource`, `DeployApp`,
-the file RPCs, `GetLogs`/`TailLogs`, `UpdateDeviceSettings`, `StreamQuery`.
-`SpikeSource` is omitted deliberately: see strain 13.
+the file RPCs, `GetLogs`/`TailLogs`, `UpdateDeviceSettings`, `StreamQuery`,
+and `Query(kSample)`. Two of those omissions are decisions rather than scope:
+`SpikeSource` because the shipped simulator's implementation is broken (strain
+13), and `kSample` because its response is a bare `repeated uint32 data` with
+nothing in the protobuf saying what the numbers are or what unit they are in.
+There is no honest UCUM code to declare on it, and SPEC §7.2 does not permit
+declaring a quantity without one, so the command does not exist. That is the
+units discipline doing exactly what it is for: an unlabelled number does not
+get through.
 
 ## What Labwire adds that Synapse does not have
 
