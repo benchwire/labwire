@@ -6,7 +6,9 @@ classes with confirmation and operator grants, declared cancel semantics, a
 device resource for discovery, reduced telemetry, and signed run manifests.
 
 > **EXPERIMENTAL, branch `synapse-bridge` only. Nothing here is published to
-> PyPI.** Verified against the `synapse-sim` simulator that ships with
+> PyPI**, and that is enforced rather than asserted: the release workflow
+> publishes an explicit matrix of project names, and `labwire-synapse` is not
+> in it. Verified against the `synapse-sim` simulator that ships with
 > `science-synapse` and against **no hardware of any kind**. No compatibility
 > with any Science Corp device is claimed. Intended for research rigs, not for
 > clinical or implanted use. Read [SYNAPSE.md](SYNAPSE.md) before using it for
