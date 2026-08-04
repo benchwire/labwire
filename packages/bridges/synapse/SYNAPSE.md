@@ -388,10 +388,21 @@ itself interruptible, and the command says so.
 
 `science-synapse` 2.7.6 requires `dearpygui`, `pyqt5`, `pyqtgraph`, `pandas`,
 `scipy`, `h5py`, `paramiko`, `numexpr`, `protoletariat` and `grpcio-tools` to
-talk to a device, and pins `rich==14.0.0` exactly. The exact pin is the one
-that bites: installing it into this workspace downgraded `rich` from 15.0.0.
-This is why `science-synapse` is an extra in no dependency group, why normal CI
-never installs it, and why the branch-local job runs only this package's tests.
+talk to a device, and pins `rich==14.0.0` exactly.
+
+The exact pin reaches further than "optional" suggests, and this is worth
+stating plainly because it is the one cost this branch imposes on the rest of
+the workspace. uv resolves optional extras into the same universal lock, so
+declaring `science-synapse` as an extra of a package nobody installs still
+moved `rich` from **15.0.0 to 14.0.0 in `uv.lock` for every package in the
+repository**. The full suite passes at 14.0.0 (658 tests with the extra
+installed, 635 and one skip without it), so nothing is broken, but the change
+is real, it is in the diff, and an extra being optional at install time does
+not make it optional at resolve time.
+
+This is also why `science-synapse` is in no dependency group, why normal CI
+never installs it, and why the branch-local job runs only this package's tests
+rather than the whole suite.
 
 ## A finding Labwire's spec does not currently cover
 
